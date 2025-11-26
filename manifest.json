@@ -1,0 +1,29 @@
+{
+  "manifest_version": 2,
+  "name": "YouTube Lyrics Helper",
+  "description": "Proof-of-concept: detect YouTube title, store approved lyrics sources, and fetch external pages via background script.",
+  "version": "1.0",
+
+  "permissions": [
+    "storage",
+    "tabs",
+    "http://*/*",
+    "https://*/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/watch*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ],
+
+  "background": {
+    "scripts": ["background.js"]
+  },
+
+  "icons": {
+    "48": "icons/icon48.png"
+  }
+}
