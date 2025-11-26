@@ -1,16 +1,14 @@
 {
   "manifest_version": 2,
-  "name": "YouTube Lyrics Helper",
-  "description": "Proof-of-concept: detect YouTube title, store approved lyrics sources, and fetch external pages via background script.",
+  "name": "YouTube Lyrics Helper (AI)",
   "version": "1.0",
-
+  "description": "Detects YouTube title, store approved lyrics sources, fetches pages, and uses a local LLM (Ollama) to extract lyrics.",
   "permissions": [
     "storage",
     "tabs",
-    "http://*/*",
+    "http://localhost/*",
     "https://*/*"
   ],
-
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/watch*"],
@@ -18,12 +16,7 @@
       "css": ["styles.css"]
     }
   ],
-
   "background": {
     "scripts": ["background.js"]
-  },
-
-  "icons": {
-    "48": "icons/icon48.png"
   }
 }
