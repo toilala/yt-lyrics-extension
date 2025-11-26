@@ -1,22 +1,36 @@
 {
   "manifest_version": 2,
-  "name": "YouTube Lyrics Helper (AI)",
+  "name": "Nepali Lyrics Helper",
   "version": "1.0",
-  "description": "Detects YouTube title, store approved lyrics sources, fetches pages, and uses a local LLM (Ollama) to extract lyrics.",
+  "description": "Displays Nepali song lyrics alongside YouTube videos",
   "permissions": [
     "storage",
-    "tabs",
-    "http://localhost/*",
+    "activeTab",
+    "https://www.youtube.com/*",
     "https://*/*"
-  ],
-  "content_scripts": [
-    {
-      "matches": ["*://*.youtube.com/watch*"],
-      "js": ["content.js"],
-      "css": ["styles.css"]
-    }
   ],
   "background": {
     "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   }
 }

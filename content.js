@@ -1,202 +1,418 @@
-// content.js (AI-enabled)
-// Full copy/paste - will:
-// 1) detect title
-// 2) allow approving a source
-// 3) fetch approved page HTML via background
-// 4) send HTML to background to call Ollama and extract lyrics
-// 5) show the lyrics (or fallback extractor)
+// Main content script that runs on YouTube pages
 
-console.log("YouTube Lyrics Helper (AI) loaded");
+let lyricsContainer = null;
+let currentSongTitle = null;
 
-function waitForTitle() {
-  return new Promise(resolve => {
-    const check = setInterval(() => {
-      const possible = [
-        document.querySelector("h1.title yt-formatted-string"),
-        document.querySelector("h1.title"),
-        document.querySelector("h1.ytd-video-primary-info-renderer"),
-        document.querySelector("h1")
-      ];
-      const el = possible.find(x => x && x.innerText && x.innerText.trim().length > 0);
-      if (el) {
-        clearInterval(check);
-        resolve(el.innerText.trim());
-      }
-    }, 400);
+// Initialize the extension when page loads
+function init() {
+  console.log('Nepali Lyrics Helper: Initializing...');
+  
+  // Wait for YouTube page to fully load
+  setTimeout(() => {
+    const songTitle = extractSongTitle();
+    if (songTitle) {
+      currentSongTitle = songTitle;
+      createLyricsPanel();
+      checkForApprovedURL(songTitle);
+    }
+  }, 2000);
+  
+  // Watch for video changes on YouTube (for playlist/autoplay)
+  observeVideoChanges();
+}
+
+// Extract song title from YouTube page
+function extractSongTitle() {
+  // Try multiple selectors as YouTube's DOM can vary
+  const titleSelectors = [
+    'h1.ytd-watch-metadata yt-formatted-string',
+    'h1.title.ytd-video-primary-info-renderer',
+    'h1 yt-formatted-string.ytd-watch-metadata'
+  ];
+  
+  for (const selector of titleSelectors) {
+    const titleElement = document.querySelector(selector);
+    if (titleElement && titleElement.textContent) {
+      let title = titleElement.textContent.trim();
+      // Clean up common YouTube title additions
+      title = title.replace(/\s*\(Official.*?\)/gi, '');
+      title = title.replace(/\s*\[Official.*?\]/gi, '');
+      title = title.replace(/\s*-\s*Official.*/gi, '');
+      console.log('Extracted song title:', title);
+      return title;
+    }
+  }
+  
+  console.log('Could not extract song title');
+  return null;
+}
+
+// Create the lyrics display panel
+function createLyricsPanel() {
+  if (lyricsContainer) return; // Already created
+  
+  lyricsContainer = document.createElement('div');
+  lyricsContainer.id = 'nepali-lyrics-panel';
+  lyricsContainer.innerHTML = `
+    <div class="lyrics-header">
+      <h3>🎵 Lyrics</h3>
+      <button id="close-lyrics">×</button>
+    </div>
+    <div class="lyrics-content">
+      <p class="lyrics-loading">Loading lyrics...</p>
+    </div>
+  `;
+  
+  // Insert panel next to video
+  const secondary = document.querySelector('#secondary');
+  if (secondary) {
+    secondary.insertBefore(lyricsContainer, secondary.firstChild);
+  } else {
+    document.body.appendChild(lyricsContainer);
+  }
+  
+  // Add close button handler
+  document.getElementById('close-lyrics').addEventListener('click', () => {
+    lyricsContainer.style.display = 'none';
   });
 }
 
-function normalizeTitle(raw) {
-  if (!raw) return "";
-  return raw
-    .replace(/\[[^\]]*\]|\([^\)]*\]|\{[^\}]*\}/g, "")
-    .replace(/official\s*video/ig, "")
-    .replace(/lyrics?/ig, "")
-    .replace(/\|.*/g, "")
-    .replace(/\bft\.?\b/ig, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+// Check if we have an approved URL for this song
+function checkForApprovedURL(songTitle) {
+  const storageKey = `lyrics_${songTitle.toLowerCase().replace(/\s+/g, '_')}`;
+  const cacheKey = `cache_${storageKey}`;
+  
+  chrome.storage.local.get([storageKey, cacheKey], (result) => {
+    if (!result[storageKey]) {
+      console.log('No approved URL found, showing search option');
+      showSearchOption(songTitle);
+      return;
+    }
+    
+    const approvedUrl = result[storageKey];
+    const cachedData = result[cacheKey];
+    
+    // Check if we have valid cached lyrics (within 7 days)
+    if (cachedData && cachedData.lyrics && cachedData.timestamp) {
+      const daysSinceCache = (Date.now() - cachedData.timestamp) / (1000 * 60 * 60 * 24);
+      
+      if (daysSinceCache < 7) {
+        console.log('Using cached lyrics (age: ' + daysSinceCache.toFixed(1) + ' days)');
+        displayLyrics(cachedData.lyrics, approvedUrl, true);
+        return;
+      } else {
+        console.log('Cache expired, fetching fresh lyrics');
+      }
+    }
+    
+    // No cache or expired - fetch fresh
+    console.log('Fetching fresh lyrics from:', approvedUrl);
+    fetchAndDisplayLyrics(approvedUrl);
+  });
 }
 
-function createBox() {
-  const existing = document.getElementById("yt-lyrics-helper-box");
-  if (existing) existing.remove();
-  const box = document.createElement("div");
-  box.id = "yt-lyrics-helper-box";
-  box.className = "yt-lyrics-helper-box";
-  const sidebar = document.querySelector("#secondary");
-  if (sidebar && sidebar.prepend) sidebar.prepend(box);
-  else document.body.prepend(box);
-  return box;
-}
-
-function escapeHtml(str) {
-  if (!str) return "";
-  return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-}
-
-function shortUrl(u) {
-  if (!u) return "";
-  return u.length > 60 ? u.slice(0, 57) + "..." : u;
-}
-
-async function renderMain(rawTitle) {
-  const normalized = normalizeTitle(rawTitle);
-  const box = createBox();
-  box.innerHTML = `<div class="header">YouTube Lyrics Helper (AI)</div>
-    <div class="meta"><strong>Detected:</strong> ${escapeHtml(rawTitle)}</div>
-    <div class="meta"><strong>Normalized:</strong> ${escapeHtml(normalized || "—")}</div>
-    <div id="store-area"></div>
-    <div id="lyrics-area" style="margin-top:10px"></div>`;
-
-  if (!normalized) {
-    document.getElementById("store-area").innerHTML = "<div class='error'>Could not normalize title.</div>";
-    return;
-  }
-
-  // Look up approved source for this normalized title
-  chrome.storage.local.get([normalized], async res => {
-    const approved = res && res[normalized];
-    const storeArea = document.getElementById("store-area");
-
-    if (approved) {
-      storeArea.innerHTML = `<div class="ok">Approved source: <a href="${approved}" target="_blank">${shortUrl(approved)}</a></div>
-        <button id="fetchFromApproved" class="primary">Fetch & Extract Lyrics</button>
-        <button id="clearApproved" class="secondary">Clear approved</button>`;
-
-      document.getElementById("clearApproved").onclick = () => {
-        chrome.storage.local.remove([normalized], () => { renderMain(rawTitle); });
-      };
-
-      document.getElementById("fetchFromApproved").onclick = async () => {
-        await fetchAndExtract(approved, normalized);
-      };
-
+// Show option to search for lyrics
+function showSearchOption(songTitle) {
+  const content = lyricsContainer.querySelector('.lyrics-content');
+  content.innerHTML = `
+    <div class="lyrics-search">
+      <p>No lyrics saved for this song yet.</p>
+      <p class="song-title"><strong>${songTitle}</strong></p>
+      <button id="search-lyrics" class="btn-primary">Search & Approve Lyrics</button>
+      <div id="manual-input" style="margin-top: 15px;">
+        <p style="font-size: 12px; color: #666;">Or paste lyrics URL directly:</p>
+        <input type="text" id="manual-url" placeholder="https://example.com/lyrics" style="width: 100%; padding: 8px; margin: 5px 0;">
+        <button id="approve-manual" class="btn-secondary">Approve This URL</button>
+      </div>
+    </div>
+  `;
+  
+  // Search button handler
+  document.getElementById('search-lyrics').addEventListener('click', () => {
+    searchForLyrics(songTitle);
+  });
+  
+  // Manual approval handler
+  document.getElementById('approve-manual').addEventListener('click', () => {
+    const url = document.getElementById('manual-url').value.trim();
+    if (url && url.startsWith('http')) {
+      approveURL(songTitle, url);
     } else {
-      // no approved source -> show search button and placeholder results
-      storeArea.innerHTML = `
-        <div class="warn">No approved source for this song yet.</div>
-        <button id="searchBtn" class="primary">Search top results</button>
-        <div id="searchResults"></div>
-      `;
-      document.getElementById("searchBtn").onclick = () => {
-        showPlaceholderResults(normalized, rawTitle);
-      };
+      alert('Please enter a valid URL starting with http:// or https://');
     }
   });
 }
 
-function showPlaceholderResults(normalizedTitle, rawTitle) {
-  const sr = document.getElementById("searchResults");
-  sr.innerHTML = `
-    <div style="margin-top:8px; background:#111; padding:8px; border-radius:8px;">
-      <div><strong>Top results (placeholder)</strong></div>
-      <ul>
-        <li><button class="approveBtn secondary" data-url="https://example.com/lyrics1">Approve Site 1</button> — example.com</li>
-        <li><button class="approveBtn secondary" data-url="https://example.com/lyrics2">Approve Site 2</button> — example.com</li>
-        <li><button class="approveBtn secondary" data-url="https://example.com/lyrics3">Approve Site 3</button> — example.com</li>
-      </ul>
+// Search for lyrics (this would use Google Custom Search API in production)
+function searchForLyrics(songTitle) {
+  const content = lyricsContainer.querySelector('.lyrics-content');
+  content.innerHTML = `
+    <div class="lyrics-search">
+      <p>🔍 Searching for: <strong>${songTitle}</strong></p>
+      <p style="font-size: 13px; color: #666; margin: 15px 0;">
+        For now, please manually search for the lyrics and paste the best URL below:
+      </p>
+      <div style="background: #f5f5f5; padding: 12px; border-radius: 5px; margin: 10px 0;">
+        <p style="font-size: 12px; margin: 5px 0;">Suggested search: <strong>"${songTitle} lyrics"</strong></p>
+        <p style="font-size: 11px; color: #888; margin: 8px 0;">✅ Recommended sites (tested):</p>
+        <ul style="font-size: 11px; color: #555; margin: 5px 0; padding-left: 20px;">
+          <li>paleti.com.np</li>
+          <li>genius.com</li>
+          <li>smule.com</li>
+        </ul>
+      </div>
+      <input type="text" id="manual-url" placeholder="Paste lyrics URL here" style="width: 100%; padding: 10px; margin: 10px 0; font-size: 14px;">
+      <button id="approve-manual" class="btn-primary">✓ Approve & Save This URL</button>
+      <button id="cancel-search" class="btn-secondary" style="margin-left: 10px;">Cancel</button>
     </div>
   `;
-
-  sr.querySelectorAll(".approveBtn").forEach(b => {
-    b.addEventListener("click", () => {
-      const url = b.dataset.url;
-      chrome.storage.local.set({ [normalizedTitle]: url }, () => {
-        renderMain(rawTitle);
-      });
-    });
+  
+  document.getElementById('approve-manual').addEventListener('click', () => {
+    const url = document.getElementById('manual-url').value.trim();
+    if (url && url.startsWith('http')) {
+      approveURL(songTitle, url);
+    } else {
+      alert('Please enter a valid URL');
+    }
+  });
+  
+  document.getElementById('cancel-search').addEventListener('click', () => {
+    showSearchOption(songTitle);
   });
 }
 
-async function fetchAndExtract(url, normalizedKey) {
-  const lyricsArea = document.getElementById("lyrics-area");
-  lyricsArea.innerHTML = `<div class="meta">Fetching ${escapeHtml(shortUrl(url))} ...</div>`;
-
-  // 1) fetch page HTML (background)
-  const fetchResp = await new Promise(resolve => {
-    chrome.runtime.sendMessage({ action: "fetch", url }, resp => resolve(resp));
+// Approve and save a URL for this song
+function approveURL(songTitle, url) {
+  const storageKey = `lyrics_${songTitle.toLowerCase().replace(/\s+/g, '_')}`;
+  
+  chrome.storage.local.set({ [storageKey]: url }, () => {
+    console.log('Approved URL saved:', url);
+    fetchAndDisplayLyrics(url);
   });
-
-  if (!fetchResp || !fetchResp.success) {
-    lyricsArea.innerHTML = `<div class="error">Failed to fetch: ${escapeHtml(fetchResp && fetchResp.error)}</div>`;
-    return;
-  }
-
-  const html = fetchResp.html || "";
-  lyricsArea.innerHTML = `<div class="meta">Fetched page. Sending to local AI for extraction (if available)...</div>`;
-
-  // 2) Ask background to call Ollama
-  const aiResp = await new Promise(resolve => {
-    chrome.runtime.sendMessage({ action: "extract_with_ai", html, model: "gpt-oss:1.0" }, resp => resolve(resp));
-  });
-
-  if (aiResp && aiResp.success && aiResp.lyrics) {
-    const cleaned = aiResp.lyrics.trim();
-    lyricsArea.innerHTML = `<div class="header">Lyrics (AI-extracted)</div><pre id="lyricsText">${escapeHtml(cleaned)}</pre>`;
-    return;
-  }
-
-  // If AI not available or failed -> show fallback generic extraction
-  lyricsArea.innerHTML = `<div class="warn">AI unavailable or failed (${escapeHtml(aiResp && aiResp.error || "unknown")}). Falling back to heuristic extraction.</div>`;
-  const fallback = genericExtractFromHtml(html);
-  lyricsArea.innerHTML += `<div class="header">Lyrics (fallback extraction)</div><pre id="lyricsText">${escapeHtml(fallback)}</pre>`;
 }
 
-function genericExtractFromHtml(html) {
-  // quick DOM parse and heuristics: pick the largest text node / container
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
-    const candidates = [
-      ...Array.from(doc.querySelectorAll("article, main, section, div")),
-      doc.body
-    ];
+// Fetch lyrics from the approved URL
+function fetchAndDisplayLyrics(url) {
+  const content = lyricsContainer.querySelector('.lyrics-content');
+  content.innerHTML = '<p class="lyrics-loading">Fetching lyrics...</p>';
+  
+  // Send message to background script to fetch the URL
+  chrome.runtime.sendMessage(
+    { action: 'fetchLyrics', url: url },
+    (response) => {
+      if (response && response.html) {
+        displayLyrics(response.html, url, false);
+        
+        // Cache the lyrics for future use
+        cacheLyrics(currentSongTitle, response.html);
+      } else {
+        content.innerHTML = `
+          <div class="lyrics-error">
+            <p>❌ Could not fetch lyrics from this URL</p>
+            <p style="font-size: 12px;">${url}</p>
+            <button id="try-different-url" class="btn-secondary">Try Different URL</button>
+          </div>
+        `;
+        
+        document.getElementById('try-different-url').addEventListener('click', () => {
+          showSearchOption(currentSongTitle);
+        });
+      }
+    }
+  );
+}
 
-    let best = {node: null, score: 0, text: ""};
-    candidates.forEach(c => {
-      const txt = (c && c.innerText) ? c.innerText.trim() : "";
-      // heuristic: lines containing short lines and many newlines indicate lyrics
-      const newlineCount = (txt.match(/\n/g) || []).length;
-      const words = txt.split(/\s+/).length;
-      const score = newlineCount * 2 + Math.min(words, 200);
-      if (score > best.score) {
-        best = { node: c, score, text: txt };
+// Cache lyrics for faster future access
+function cacheLyrics(songTitle, lyricsHtml) {
+  const storageKey = `lyrics_${songTitle.toLowerCase().replace(/\s+/g, '_')}`;
+  const cacheKey = `cache_${storageKey}`;
+  
+  const cacheData = {
+    lyrics: lyricsHtml,
+    timestamp: Date.now()
+  };
+  
+  chrome.storage.local.set({ [cacheKey]: cacheData }, () => {
+    console.log('Lyrics cached for:', songTitle);
+  });
+}
+
+// Display the fetched lyrics
+function displayLyrics(html, sourceUrl, fromCache = false) {
+  const content = lyricsContainer.querySelector('.lyrics-content');
+  
+  // Parse the HTML
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  // Try to extract lyrics (you'll need to customize these selectors for your specific sites)
+  let lyricsText = extractLyricsFromHTML(doc);
+  
+  if (lyricsText) {
+    const cacheIndicator = fromCache 
+      ? '<span style="font-size: 10px; color: #888;">⚡ Cached</span>' 
+      : '<span style="font-size: 10px; color: #28a745;">🌐 Fresh</span>';
+    
+    content.innerHTML = `
+      <div class="lyrics-display">
+        <div class="lyrics-text">${lyricsText}</div>
+        <div class="lyrics-footer">
+          <small>Source: <a href="${sourceUrl}" target="_blank">${new URL(sourceUrl).hostname}</a> ${cacheIndicator}</small>
+          <button id="change-url" class="btn-link">Change URL</button>
+        </div>
+      </div>
+    `;
+    
+    document.getElementById('change-url').addEventListener('click', () => {
+      if (confirm('Do you want to select a different lyrics source for this song?')) {
+        showSearchOption(currentSongTitle);
       }
     });
-
-    // Trim to a reasonable size
-    let out = best.text || "";
-    if (out.length > 20000) out = out.slice(0, 20000) + "\n\n...[truncated]";
-    return out || "No good extracted text found.";
-  } catch (err) {
-    console.error("fallback extract error:", err);
-    return "Fallback extractor failed: " + (err && err.message);
+  } else {
+    content.innerHTML = `
+      <div class="lyrics-error">
+        <p>⚠️ Lyrics found but format not recognized</p>
+        <p style="font-size: 12px;">The page was fetched but lyrics couldn't be extracted.</p>
+        <button id="try-different-url" class="btn-secondary">Try Different URL</button>
+        <details style="margin-top: 10px;">
+          <summary style="cursor: pointer; font-size: 12px;">Show raw content</summary>
+          <div style="max-height: 300px; overflow: auto; font-size: 11px; margin-top: 5px;">
+            ${doc.body.textContent.substring(0, 1000)}...
+          </div>
+        </details>
+      </div>
+    `;
+    
+    document.getElementById('try-different-url').addEventListener('click', () => {
+      showSearchOption(currentSongTitle);
+    });
   }
 }
 
-/* Entry point */
-(async function() {
-  const raw = await waitForTitle();
-  renderMain(raw);
-})();
+// Extract lyrics from HTML using site-specific selectors
+function extractLyricsFromHTML(doc) {
+  const url = doc.location?.href || '';
+  
+  // 1. SMULE - span.sc-gsnTZi.gsCpaT inside div.sc-cUEIKg.fsBOFX
+  if (url.includes('smule.com')) {
+    const spans = doc.querySelectorAll('span.sc-gsnTZi.gsCpaT');
+    if (spans.length > 0) {
+      const lines = Array.from(spans).map(span => span.textContent.trim());
+      return lines.filter(line => line).join('<br>');
+    }
+  }
+  
+  // 2. PALETI - div.lyrics-div with paragraphs
+  if (url.includes('paleti.com')) {
+    const lyricsDiv = doc.querySelector('div.lyrics-div');
+    if (lyricsDiv) {
+      // Get all paragraphs, skip transliterated/translated if needed
+      const paragraphs = lyricsDiv.querySelectorAll('p');
+      if (paragraphs.length > 0) {
+        return Array.from(paragraphs).map(p => p.innerHTML).join('<br><br>');
+      }
+    }
+  }
+  
+  // 3. GENIUS - div[data-lyrics-container="true"]
+  if (url.includes('genius.com')) {
+    const containers = doc.querySelectorAll('div[data-lyrics-container="true"]');
+    if (containers.length > 0) {
+      let lyrics = '';
+      containers.forEach(container => {
+        // Skip excluded sections
+        if (!container.hasAttribute('data-exclude-from-selection')) {
+          lyrics += container.innerHTML + '<br><br>';
+        }
+      });
+      if (lyrics.length > 100) {
+        return lyrics;
+      }
+    }
+  }
+  
+  // Generic fallback selectors for other Nepali lyrics sites
+  const genericSelectors = [
+    '.lyrics',
+    '#lyrics',
+    '.song-lyrics',
+    '.lyrics-div',
+    '.entry-content',
+    '.post-content',
+    'article'
+  ];
+  
+  for (const selector of genericSelectors) {
+    const element = doc.querySelector(selector);
+    if (element) {
+      let lyrics = element.innerHTML;
+      // Clean up scripts and styles
+      lyrics = lyrics.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+      lyrics = lyrics.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+      
+      if (lyrics.length > 100) {
+        return lyrics;
+      }
+    }
+  }
+  
+  return null;
+}
+
+// Observe video changes on YouTube
+function observeVideoChanges() {
+  let lastUrl = location.href;
+  
+  new MutationObserver(() => {
+    const currentUrl = location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      console.log('Video changed, reloading lyrics...');
+      
+      // Remove old panel
+      if (lyricsContainer) {
+        lyricsContainer.remove();
+        lyricsContainer = null;
+      }
+      
+      // Reinitialize
+      setTimeout(init, 1000);
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+// Clean up cache entries older than 7 days (runs once per session)
+function cleanupOldCache() {
+  chrome.storage.local.get(null, (items) => {
+    const now = Date.now();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    const keysToRemove = [];
+    
+    for (const key in items) {
+      if (key.startsWith('cache_')) {
+        const cacheData = items[key];
+        if (cacheData && cacheData.timestamp) {
+          if (now - cacheData.timestamp > sevenDays) {
+            keysToRemove.push(key);
+          }
+        }
+      }
+    }
+    
+    if (keysToRemove.length > 0) {
+      chrome.storage.local.remove(keysToRemove, () => {
+        console.log('Cleaned up', keysToRemove.length, 'old cache entries');
+      });
+    }
+  });
+}
+
+// Start the extension
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+// Clean up old cache entries periodically (runs once per session)
+cleanupOldCache();
