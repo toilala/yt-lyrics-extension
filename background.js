@@ -1,30 +1,33 @@
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === 'fetchLyrics') {
-    fetch(msg.url)
-      .then(response => response.text())
-      .then(htmlText => {
-        let parser = new DOMParser();
-        let doc = parser.parseFromString(htmlText, 'text/html');
-        let lyrics = extractLyrics(doc, msg.url);
-        sendResponse(lyrics);
+// BACKGROUND SCRIPT - Handles fetching lyrics URLs
+console.log('🎵 Background script loaded');
+
+// Listen for messages from content script
+browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('📨 Background received message:', request.action);
+  
+  if (request.action === 'fetchLyrics') {
+    console.log('🌐 Fetching URL:', request.url);
+    
+    fetch(request.url)
+      .then(response => {
+        console.log('📥 Response status:', response.status);
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        return response.text();
       })
-      .catch(err => sendResponse('Failed to fetch lyrics.'));
-    return true; // keep the channel open for async
+      .then(html => {
+        console.log('✅ Got HTML, length:', html.length);
+        sendResponse({ success: true, html: html });
+      })
+      .catch(error => {
+        console.error('❌ Fetch error:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    
+    // Return true to indicate async response
+    return true;
   }
 });
 
-// Site-specific scraping rules
-function extractLyrics(doc, url) {
-  if (url.includes('genius.com')) {
-    let lyricsDiv = doc.querySelector('.lyrics, [data-lyrics-container]');
-    return lyricsDiv ? lyricsDiv.innerText : 'Lyrics not found.';
-  } else if (url.includes('nepalilyrics.com')) {
-    let lyricsDiv = doc.querySelector('.lyrics-text');
-    return lyricsDiv ? lyricsDiv.innerText : 'Lyrics not found.';
-  } else if (url.includes('nepalisongs.com')) {
-    let lyricsDiv = doc.querySelector('#song-content');
-    return lyricsDiv ? lyricsDiv.innerText : 'Lyrics not found.';
-  } else {
-    return 'Site not supported yet.';
-  }
-}
+console.log('🎵 Background script ready');

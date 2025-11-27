@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   document.getElementById('view-saved').addEventListener('click', viewSavedSongs);
   document.getElementById('clear-data').addEventListener('click', clearAllData);
+  document.getElementById('clear-cache').addEventListener('click', clearCache);
 });
 
 // Load and display statistics
@@ -152,4 +153,23 @@ function clearAllData() {
       });
     });
   }
+}
+
+// Clear only cached lyrics (keep approved URLs)
+function clearCache() {
+  chrome.storage.local.get(null, (items) => {
+    const cacheKeys = Object.keys(items).filter(key => key.startsWith('cache_'));
+    
+    if (cacheKeys.length === 0) {
+      alert('No cached lyrics to clear.');
+      return;
+    }
+    
+    if (confirm(`Clear ${cacheKeys.length} cached lyrics? Your approved URLs will be kept.`)) {
+      chrome.storage.local.remove(cacheKeys, () => {
+        alert('Cache cleared! Lyrics will be fetched fresh next time.');
+        loadStats();
+      });
+    }
+  });
 }
