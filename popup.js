@@ -1,59 +1,76 @@
-// Popup script
-document.addEventListener('DOMContentLoaded', () => {
-  loadStats();
-  
-  document.getElementById('view-saved').addEventListener('click', viewSavedSongs);
-  document.getElementById('clear-data').addEventListener('click', clearAllData);
-});
+// popup.js (Chrome MV3, using chrome.*)
+const els = {
+  title: document.getElementById("title"),
+  btnGet: document.getElementById("btnGet"),
+  btnClear: document.getElementById("btnClear"),
+  status: document.getElementById("status"),
+  lyrics: document.getElementById("lyrics")
+};
 
-// Load statistics
-function loadStats() {
-  browser.storage.local.get(null).then(items => {
-    const lyricsKeys = Object.keys(items).filter(key => key.startsWith('lyrics_'));
-    document.getElementById('song-count').textContent = lyricsKeys.length;
-    
-    // Calculate storage size
-    let totalSize = 0;
-    for (const key in items) {
-      totalSize += JSON.stringify(items[key]).length;
-    }
-    const sizeKB = (totalSize / 1024).toFixed(1);
-    document.getElementById('storage-size').textContent = sizeKB + ' KB';
-  });
-}
+function setStatus(s) { els.status.textContent = s; }
+function setLyrics(t) { els.lyrics.textContent = t || "No lyrics."; }
 
-// View saved songs
-function viewSavedSongs() {
-  browser.storage.local.get(null).then(items => {
-    const lyricsKeys = Object.keys(items).filter(key => key.startsWith('lyrics_'));
-    
-    if (lyricsKeys.length === 0) {
-      alert('No saved songs yet! Visit YouTube and the extension will auto-search Genius.');
-      return;
-    }
-    
-    let message = `Saved Songs (${lyricsKeys.length}):\n\n`;
-    lyricsKeys.forEach((key, index) => {
-      const songName = key.replace('lyrics_', '').replace(/_/g, ' ');
-      const url = items[key];
-      const domain = new URL(url).hostname;
-      message += `${index + 1}. ${songName}\n   (${domain})\n\n`;
+// Prefill title from active YouTube tab (best-effort)
+async function prefillFromYouTube() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs || !tabs[0]) return;
+    const tab = tabs[0];
+    if (!tab.url || !tab.url.includes("youtube.com/watch")) return;
+
+    // Inject a small function into the page to read the title
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const el = document.querySelector("h1.title yt-formatted-string") ||
+                   document.querySelector("h1.title") ||
+                   document.querySelector('meta[name="title"]');
+        return el ? (el.innerText || el.textContent || document.title) : document.title;
+      }
     });
-    
-    alert(message);
-  });
-}
 
-// Clear all data
-function clearAllData() {
-  if (confirm('Delete ALL saved lyrics URLs?\n\nThis cannot be undone!')) {
-    browser.storage.local.get(null).then(items => {
-      const lyricsKeys = Object.keys(items).filter(key => key.startsWith('lyrics_'));
-      
-      browser.storage.local.remove(lyricsKeys).then(() => {
-        alert(`Deleted ${lyricsKeys.length} saved songs.`);
-        loadStats();
-      });
-    });
+    if (results && results[0] && results[0].result) {
+      els.title.value = results[0].result;
+      setStatus("Prefilled title from YouTube (editable).");
+    }
+  } catch (e) {
+    console.debug("prefill error:", e);
   }
 }
+
+// Request lyrics from background
+async function requestLyrics() {
+  const title = els.title.value.trim();
+  if (!title) { setStatus("Enter a title."); return; }
+  setStatus("Fetching lyrics (checking cache)...");
+  setLyrics("");
+  try {
+    const res = await chrome.runtime.sendMessage({ action: "getLyricsForTitle", title });
+    if (!res) { setStatus("No response."); return; }
+    if (res.success) {
+      setStatus(res.source === "cache" ? "Loaded from cache" : "Fetched from Gemini");
+      setLyrics(res.lyrics || "No lyrics returned.");
+    } else {
+      setStatus("Error: " + (res.error || "unknown"));
+      setLyrics(res.error || "No lyrics.");
+    }
+  } catch (err) {
+    setStatus("Error sending message: " + err.message);
+  }
+}
+
+async function clearCache() {
+  setStatus("Clearing cache...");
+  try {
+    await chrome.runtime.sendMessage({ action: "clearCache" });
+    setStatus("Cache cleared.");
+    setLyrics("");
+  } catch (e) {
+    setStatus("Error clearing cache: " + e.message);
+  }
+}
+
+// Init
+prefillFromYouTube();
+els.btnGet.addEventListener("click", requestLyrics);
+els.btnClear.addEventListener("click", clearCache);

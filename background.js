@@ -1,90 +1,124 @@
-// BACKGROUND SCRIPT - Handles Genius API and fetching
-console.log('🎵 Background script loaded');
+// background.js (Manifest V3 service worker)
+// >>> REPLACE this with your Gemini API key before loading the extension <<<
+const GEMINI_API_KEY = "AIzaSyDNIYQz9vKRU8lOzPZFkD1NT_tLc2EMrEQ";
 
-const GENIUS_API_KEY = 'Ba4mF1mcqZoVkukyAGaYxNmOGpfp2GZ3gJa4EiFL4oq2iOoh5YOzeRPtyciA3p9_QdJN2EXaXWEKmjm-EWgb2w';
+// background.js — Chrome MV3 service worker
+// >>> Replace with your actual Gemini API key <<<
 
-// Listen for messages from content script
-browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('📨 Background received message:', request.action);
-  
-  if (request.action === 'searchGenius') {
-    searchGeniusAPI(request.query)
-      .then(result => sendResponse(result))
-      .catch(error => {
-        console.error('❌ Genius search error:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Async response
+
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// ------- Helpers -------
+function normalizeKey(title) {
+  if (!title) return "";
+  let s = title.replace(/\(.*?\)|\[.*?\]/g, "");
+  if (s.includes("-")) s = s.split("-").slice(1).join("-");
+  s = s.replace(/\b(official|music video|lyrics|lyric video|hd|4k|audio)\b/gi, "");
+  s = s.replace(/[^\w\s\u0900-\u097F]/g, " ");
+  s = s.replace(/\s{2,}/g, " ").trim().toLowerCase();
+  s = s.replace(/\s+/g, "_");
+  return `lyrics_${s || "unknown"}`;
+}
+
+async function cacheLyrics(key, lyrics) {
+  await chrome.storage.local.set({ [key]: { lyrics, ts: Date.now() } });
+}
+
+async function loadCachedLyrics(key) {
+  const r = await chrome.storage.local.get(key);
+  if (!r[key]) return null;
+  if (Date.now() - r[key].ts > CACHE_TTL_MS) {
+    await chrome.storage.local.remove(key);
+    return null;
   }
-  
-  if (request.action === 'fetchLyrics') {
-    fetchLyricsFromURL(request.url)
-      .then(html => sendResponse({ success: true, html: html }))
-      .catch(error => {
-        console.error('❌ Fetch error:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Async response
-  }
-});
+  return r[key].lyrics;
+}
 
-// Search Genius API for a song
-async function searchGeniusAPI(query) {
-  console.log('🔍 Searching Genius for:', query);
-  
-  const searchUrl = `https://api.genius.com/search?q=${encodeURIComponent(query)}`;
-  
-  try {
-    const response = await fetch(searchUrl, {
-      headers: {
-        'Authorization': `Bearer ${GENIUS_API_KEY}`
+function buildPrompt(title) {
+  return `Return only the full lyrics of the Nepali song "${title}". 
+NO commentary. NO metadata. ONLY the lyrics with proper line breaks.`;
+}
+
+// ------- MAIN GEMINI CALL (MATCHES YOUR CURL) -------
+async function fetchFromGemini(title) {
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+  const body = {
+    contents: [
+      {
+        parts: [{ text: buildPrompt(title) }]
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Genius API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    console.log('📥 Genius response:', data);
-    
-    if (data.response && data.response.hits && data.response.hits.length > 0) {
-      const hits = data.response.hits;
-      console.log(`✅ Found ${hits.length} results on Genius`);
-      
-      // Return top results
-      const results = hits.slice(0, 5).map(hit => ({
-        title: hit.result.title,
-        artist: hit.result.primary_artist.name,
-        url: hit.result.url,
-        thumbnail: hit.result.song_art_image_thumbnail_url
-      }));
-      
-      return { success: true, results: results };
-    } else {
-      console.log('❌ No results found on Genius');
-      return { success: false, message: 'No results found' };
-    }
-  } catch (error) {
-    console.error('❌ Genius API error:', error);
-    return { success: false, error: error.message };
+    ]
+  };
+
+  const resp = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    throw new Error(
+      `Gemini API error ${resp.status}: ${JSON.stringify(data)}`
+    );
   }
+
+  // -------- response parsing --------
+  let text = null;
+
+  // format: data.candidates[0].content.parts[x].text
+  try {
+    const parts = data.candidates?.[0]?.content?.parts;
+    if (parts) text = parts.map(p => p.text).join("\n");
+  } catch {}
+
+  // fallback
+  if (!text) text = JSON.stringify(data, null, 2);
+
+  return text;
 }
 
-// Fetch lyrics from a URL
-async function fetchLyricsFromURL(url) {
-  console.log('🌐 Fetching URL:', url);
-  
-  const response = await fetch(url);
-  
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  
-  const html = await response.text();
-  console.log('✅ Fetched HTML, length:', html.length);
-  
-  return html;
-}
+// ------- MESSAGE HANDLER -------
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  (async () => {
+    try {
+      if (msg.action === "getLyricsForTitle") {
+        const title = msg.title || "";
+        const key = normalizeKey(title);
 
-console.log('🎵 Background script ready with Genius API');
+        const cached = await loadCachedLyrics(key);
+        if (cached) {
+          sendResponse({ success: true, source: "cache", lyrics: cached });
+          return;
+        }
+
+        try {
+          const lyrics = await fetchFromGemini(title);
+          await cacheLyrics(key, lyrics);
+          sendResponse({ success: true, source: "gemini", lyrics });
+          return;
+        } catch (e) {
+          sendResponse({ success: false, error: e.message });
+          return;
+        }
+      }
+
+      if (msg.action === "clearCache") {
+        await chrome.storage.local.clear();
+        sendResponse({ success: true });
+        return;
+      }
+
+      sendResponse({ success: false, error: "unknown action" });
+    } catch (e) {
+      sendResponse({ success: false, error: e.message });
+    }
+  })();
+
+  return true;
+});

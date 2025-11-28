@@ -1,119 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Nepali Lyrics Helper</title>
-  <style>
-    body {
-      width: 320px;
-      padding: 16px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      margin: 0;
-    }
-    
-    h2 {
-      margin: 0 0 12px 0;
-      font-size: 18px;
-      color: #030303;
-    }
-    
-    p {
-      font-size: 13px;
-      line-height: 1.5;
-      color: #606060;
-      margin: 8px 0;
-    }
-    
-    .stats {
-      background: #f9f9f9;
-      padding: 12px;
-      border-radius: 8px;
-      margin: 12px 0;
-    }
-    
-    .stat-item {
-      display: flex;
-      justify-content: space-between;
-      margin: 6px 0;
-      font-size: 13px;
-    }
-    
-    .stat-label {
-      color: #606060;
-    }
-    
-    .stat-value {
-      font-weight: 600;
-      color: #030303;
-    }
-    
-    button {
-      width: 100%;
-      padding: 10px;
-      background: #065fd4;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      margin: 6px 0;
-      transition: all 0.2s;
-    }
-    
-    button:hover {
-      background: #0553c2;
-    }
-    
-    button.secondary {
-      background: white;
-      color: #065fd4;
-      border: 1px solid #065fd4;
-    }
-    
-    button.secondary:hover {
-      background: #f2f2f2;
-    }
-    
-    .footer {
-      margin-top: 16px;
-      padding-top: 12px;
-      border-top: 1px solid #e0e0e0;
-      font-size: 11px;
-      color: #888;
-      text-align: center;
-    }
-    
-    .powered-by {
-      margin-top: 8px;
-      font-size: 10px;
-      color: #999;
-    }
-  </style>
+  <meta charset="utf-8" />
+  <title>Gemini Lyrics (Popup)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h2>🎵 Nepali Lyrics Helper</h2>
-  <p>Automatic lyrics using Genius API</p>
-  
-  <div class="stats">
-    <div class="stat-item">
-      <span class="stat-label">Saved Songs:</span>
-      <span class="stat-value" id="song-count">0</span>
+  <div id="app">
+    <h2>Gemini Lyrics</h2>
+
+    <label for="title">Song title (edit if needed)</label>
+    <input id="title" type="text" placeholder="Phatteman - Marna Baru Garho Hunna" />
+
+    <div class="row">
+      <button id="btnGet">Get Lyrics</button>
+      <button id="btnClear" class="secondary">Clear Cache</button>
     </div>
-    <div class="stat-item">
-      <span class="stat-label">Storage:</span>
-      <span class="stat-value" id="storage-size">0 KB</span>
-    </div>
+
+    <div id="status" class="muted">Ready.</div>
+
+    <h4>Lyrics</h4>
+    <pre id="lyrics" class="lyrics">No lyrics yet.</pre>
   </div>
-  
-  <button id="view-saved">📋 View Saved Songs</button>
-  <button class="secondary" id="clear-data">🗑️ Clear All Data</button>
-  
-  <div class="footer">
-    Made for hearing-impaired music lovers ❤️
-    <div class="powered-by">Powered by Genius API</div>
-  </div>
-  
+
   <script src="popup.js"></script>
 </body>
 </html>

@@ -1,30 +1,29 @@
 {
-  "manifest_version": 2,
-  "name": "Nepali Lyrics Helper",
+  "manifest_version": 3,
+  "name": "YouTube Lyrics — Gemini (Popup)",
   "version": "1.0",
-  "description": "Displays Nepali song lyrics on YouTube using Genius API",
-  
-  "permissions": [
-    "storage",
-    "https://www.youtube.com/*",
-    "https://api.genius.com/*",
-    "https://*/*"
+  "description": "Fetch lyrics for YouTube videos using Gemini API (popup-only). Replace API key in background.js before loading.",
+  "permissions": ["storage", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
   ],
-  
   "background": {
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
-  
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icon.png"
+    }
+  },
   "content_scripts": [
     {
-      "matches": ["*://www.youtube.com/watch*"],
-      "js": ["content.js"],
-      "css": ["styles.css"],
-      "run_at": "document_end"
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content_dummy.js"],
+      "run_at": "document_idle"
     }
   ],
-  
-  "browser_action": {
-    "default_popup": "popup.html"
+  "icons": {
+    "48": "icon.png"
   }
 }
