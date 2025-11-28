@@ -2,11 +2,12 @@
   "manifest_version": 2,
   "name": "Nepali Lyrics Helper",
   "version": "1.0",
-  "description": "Displays Nepali song lyrics on YouTube",
+  "description": "Displays Nepali song lyrics on YouTube using Genius API",
   
   "permissions": [
     "storage",
     "https://www.youtube.com/*",
+    "https://api.genius.com/*",
     "https://*/*"
   ],
   
