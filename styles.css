@@ -11,6 +11,8 @@
 /* Button hover effects */
 #nepali-lyrics-panel button:hover {
   opacity: 0.85;
+
+  
   transform: translateY(-1px);
 }
 
