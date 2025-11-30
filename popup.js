@@ -1,4 +1,3 @@
-// popup.js (Chrome MV3, using chrome.*)
 const els = {
   title: document.getElementById("title"),
   btnGet: document.getElementById("btnGet"),
@@ -7,67 +6,69 @@ const els = {
   lyrics: document.getElementById("lyrics")
 };
 
-function setStatus(s) { els.status.textContent = s; }
-function setLyrics(t) { els.lyrics.textContent = t || "No lyrics."; }
+function setStatus(t) {
+  els.status.textContent = t;
+}
+function setLyrics(t) {
+  els.lyrics.textContent = t || "No lyrics.";
+}
 
-// Prefill title from active YouTube tab (best-effort)
+// Auto-fill title from YouTube tab
 async function prefillFromYouTube() {
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tabs || !tabs[0]) return;
-    const tab = tabs[0];
-    if (!tab.url || !tab.url.includes("youtube.com/watch")) return;
-
-    // Inject a small function into the page to read the title
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        const el = document.querySelector("h1.title yt-formatted-string") ||
-                   document.querySelector("h1.title") ||
-                   document.querySelector('meta[name="title"]');
-        return el ? (el.innerText || el.textContent || document.title) : document.title;
-      }
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true
     });
 
-    if (results && results[0] && results[0].result) {
-      els.title.value = results[0].result;
-      setStatus("Prefilled title from YouTube (editable).");
+    if (!tab || !tab.url.includes("youtube.com/watch")) return;
+
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => document.title.replace("- YouTube", "").trim()
+    });
+
+    if (result) {
+      els.title.value = result;
+      setStatus("Title detected from YouTube.");
     }
   } catch (e) {
-    console.debug("prefill error:", e);
+    setStatus("Couldn't prefill title.");
   }
 }
 
-// Request lyrics from background
+// Request lyrics
 async function requestLyrics() {
   const title = els.title.value.trim();
-  if (!title) { setStatus("Enter a title."); return; }
-  setStatus("Fetching lyrics (checking cache)...");
+  if (!title) return setStatus("Enter a title.");
+
+  setStatus("Fetching...");
   setLyrics("");
+
   try {
-    const res = await chrome.runtime.sendMessage({ action: "getLyricsForTitle", title });
-    if (!res) { setStatus("No response."); return; }
+    const res = await chrome.runtime.sendMessage({
+      action: "getLyricsForTitle",
+      title
+    });
+
+    if (!res) return setStatus("No response.");
+
     if (res.success) {
-      setStatus(res.source === "cache" ? "Loaded from cache" : "Fetched from Gemini");
-      setLyrics(res.lyrics || "No lyrics returned.");
+      setStatus(`Loaded from ${res.source}`);
+      setLyrics(res.lyrics);
     } else {
-      setStatus("Error: " + (res.error || "unknown"));
-      setLyrics(res.error || "No lyrics.");
+      setStatus("Error: " + res.error);
     }
-  } catch (err) {
-    setStatus("Error sending message: " + err.message);
+  } catch (e) {
+    setStatus("Error: " + e.message);
   }
 }
 
+// Clear cache
 async function clearCache() {
-  setStatus("Clearing cache...");
-  try {
-    await chrome.runtime.sendMessage({ action: "clearCache" });
-    setStatus("Cache cleared.");
-    setLyrics("");
-  } catch (e) {
-    setStatus("Error clearing cache: " + e.message);
-  }
+  await chrome.runtime.sendMessage({ action: "clearCache" });
+  setStatus("Cache cleared.");
+  setLyrics("");
 }
 
 // Init

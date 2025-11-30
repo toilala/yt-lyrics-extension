@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Lyrics — Gemini (Popup)",
+  "name": "YouTube Lyrics — Gemini",
   "version": "1.0",
-  "description": "Fetch lyrics for YouTube videos using Gemini API (popup-only). Replace API key in background.js before loading.",
-  "permissions": ["storage", "scripting", "activeTab"],
-  "host_permissions": [
-    "https://generativelanguage.googleapis.com/*"
+  "description": "Fetch lyrics using Gemini API",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
   ],
   "background": {
     "service_worker": "background.js"
@@ -13,17 +14,14 @@
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "48": "icon.png"
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
     }
   },
-  "content_scripts": [
-    {
-      "matches": ["*://*.youtube.com/*"],
-      "js": ["content_dummy.js"],
-      "run_at": "document_idle"
-    }
-  ],
   "icons": {
-    "48": "icon.png"
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   }
 }
