@@ -18,7 +18,9 @@ input[type="text"] {
 
 .buttons {
   display: flex;
-  gap: 5px;
+  gap: 6px;
+
+
 }
 
 button {
