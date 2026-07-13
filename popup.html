@@ -1,25 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>YouTube Lyrics — Gemini</title>
-  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <div class="container">
     <h2>YouTube Lyrics</h2>
 
-    <input type="password" id="apiKey" placeholder="Gemini API key">
-    <button id="btnSaveKey">Save API Key</button>
+    <label for="apiKey">Gemini API Key</label>
+    <input id="apiKey" type="password" placeholder="Paste your Gemini API key" />
 
-    <input type="text" id="title" placeholder="Enter song title">
+    <label for="model">Gemini Model</label>
+    <input id="model" type="text" placeholder="e.g. gemini-1.5-flash" />
+
     <div class="buttons">
-      <button id="btnGet">Get Lyrics</button>
+      <button id="btnSaveSettings">Save Settings</button>
+      <button id="btnTestApi">Test API</button>
+    </div>
+
+    <hr />
+
+    <label for="title">Song Title</label>
+    <input id="title" type="text" placeholder="Auto-filled from YouTube when possible" />
+
+    <div class="buttons">
+      <button id="btnGet">Get Verified Lyrics</button>
       <button id="btnClear">Clear Cache</button>
     </div>
+
     <p id="status"></p>
     <pre id="lyrics"></pre>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

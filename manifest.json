@@ -2,23 +2,18 @@
   "manifest_version": 3,
   "name": "YouTube Lyrics — Gemini",
   "version": "1.1.0",
-  "description": "Fetch lyrics for YouTube songs using Gemini API",
+  "description": "Fetch and verify lyrics from web sources using Gemini extraction.",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://duckduckgo.com/*",
+    "https://www.azlyrics.com/*",
+    "https://genius.com/*",
+    "https://www.lyrics.com/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "icon16.png",
-      "48": "icon48.png",
-      "128": "icon128.png"
-    }
-  },
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html" },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],

@@ -63,3 +63,36 @@ The key is stored in `chrome.storage.sync` for your browser profile.
 - Lyrics quality depends on LLM output and song availability.
 - Some songs may return incomplete or incorrect text.
 - YouTube page structure changes can affect title detection logic.
+
+
+
+
+## Gemini API Key Setup (User Guide)
+
+1. Open Google AI Studio: https://aistudio.google.com/
+2. Sign in with your Google account.
+3. Create an API key.
+4. Open the extension popup.
+5. Paste your API key.
+6. Choose a model (start with `gemini-1.5-flash`).
+7. Click **Save Settings**.
+8. Click **Test API**.
+
+### Free-tier notes
+
+- Free model availability can vary by account, region, and current Google policy.
+- If one model fails, try another Flash model in the popup model field.
+- Errors like 401/403 usually mean invalid key, disabled API, or project/billing restrictions.
+
+
+// now to commit to github we follow these steps:
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin <your-repo-url>
+git push -u origin main
+git status
+git log
+git remote -v
+git pull origin main

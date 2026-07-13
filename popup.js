@@ -1,6 +1,8 @@
 const els = {
   apiKey: document.getElementById("apiKey"),
-  btnSaveKey: document.getElementById("btnSaveKey"),
+  model: document.getElementById("model"),
+  btnSaveSettings: document.getElementById("btnSaveSettings"),
+  btnTestApi: document.getElementById("btnTestApi"),
   title: document.getElementById("title"),
   btnGet: document.getElementById("btnGet"),
   btnClear: document.getElementById("btnClear"),
@@ -8,67 +10,121 @@ const els = {
   lyrics: document.getElementById("lyrics")
 };
 
-function setStatus(t) { els.status.textContent = t; }
-function setLyrics(t) { els.lyrics.textContent = t || "No lyrics."; }
-
-async function initKeyStatus() {
-  const res = await chrome.runtime.sendMessage({ action: "getApiKeyStatus" });
-  if (res?.hasKey) setStatus("API key configured.");
+function setStatus(text) {
+  els.status.textContent = text || "";
 }
 
-async function saveApiKey() {
-  const apiKey = (els.apiKey.value || "").trim();
-  if (!apiKey) return setStatus("Enter API key.");
-  await chrome.runtime.sendMessage({ action: "setApiKey", apiKey });
+function setLyrics(text) {
+  els.lyrics.textContent = text || "";
+}
+
+async function send(msg) {
+  return chrome.runtime.sendMessage(msg);
+}
+
+async function loadSettings() {
+  const res = await send({ action: "getSettings" });
+  if (!res?.success) return;
+
+  // apiKey intentionally masked by background
   els.apiKey.value = "";
-  setStatus("API key saved.");
+  els.model.value = res.settings?.model || "gemini-1.5-flash";
+  setStatus(res.settings?.apiKey ? "API key configured." : "Set your Gemini API key.");
+}
+
+async function saveSettings() {
+  const apiKey = (els.apiKey.value || "").trim();
+  const model = (els.model.value || "").trim() || "gemini-1.5-flash";
+
+  const res = await send({ action: "saveSettings", apiKey, model });
+  if (res?.success) {
+    els.apiKey.value = "";
+    setStatus("Settings saved.");
+  } else {
+    setStatus("Failed to save settings.");
+  }
+}
+
+async function testApi() {
+  const apiKey = (els.apiKey.value || "").trim();
+  const model = (els.model.value || "").trim();
+  setStatus("Testing API...");
+  const res = await send({ action: "testApi", apiKey, model });
+
+  if (res?.success) setStatus("API test successful.");
+  else setStatus(`API test failed: ${res?.error || "Unknown error"}`);
 }
 
 async function prefillFromYouTube() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.url?.includes("youtube.com/watch")) return;
+    if (!tab?.id || !tab?.url?.includes("youtube.com/watch")) return;
+
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => document.title.replace("- YouTube", "").trim()
+      func: () => (document.title || "").replace(/\s*-\s*YouTube\s*$/i, "").trim()
     });
+
     if (result) {
       els.title.value = result;
-      setStatus("Title detected from YouTube.");
+      setStatus("Detected title from YouTube.");
     }
   } catch {
-    setStatus("Couldn't prefill title.");
+    // ignore
   }
 }
 
 async function requestLyrics() {
-  const title = els.title.value.trim();
-  if (!title) return setStatus("Enter a title.");
-  setStatus("Fetching...");
+  const title = (els.title.value || "").trim();
+  if (!title) {
+    setStatus("Enter a song title.");
+    return;
+  }
+
+  setStatus("Fetching + verifying lyrics...");
   setLyrics("");
 
   try {
-    const res = await chrome.runtime.sendMessage({ action: "getLyricsForTitle", title });
-    if (!res) return setStatus("No response.");
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const pageUrl = tab?.url || "";
+
+    const res = await send({
+      action: "getLyricsForTitle",
+      title,
+      pageUrl
+    });
+
+    if (!res) {
+      setStatus("No response from background.");
+      return;
+    }
+
     if (res.success) {
-      setStatus(`Loaded from ${res.source}`);
-      setLyrics(res.lyrics);
+      setLyrics(res.lyrics || "");
+      const source = res.meta?.sourceDomain ? ` (${res.meta.sourceDomain})` : "";
+      setStatus(`Success: ${res.source}${source}`);
     } else {
-      setStatus("Error: " + res.error);
+      setStatus(`Error: ${res.error || "Unknown error"}`);
     }
   } catch (e) {
-    setStatus("Error: " + e.message);
+    setStatus(`Error: ${e.message || String(e)}`);
   }
 }
 
 async function clearCache() {
-  await chrome.runtime.sendMessage({ action: "clearCache" });
-  setStatus("Cache cleared.");
-  setLyrics("");
+  const res = await send({ action: "clearCache" });
+  if (res?.success) {
+    setStatus("Cache cleared.");
+    setLyrics("");
+  } else {
+    setStatus("Failed to clear cache.");
+  }
 }
 
-initKeyStatus();
-prefillFromYouTube();
-els.btnSaveKey.addEventListener("click", saveApiKey);
+els.btnSaveSettings.addEventListener("click", saveSettings);
+els.btnTestApi.addEventListener("click", testApi);
 els.btnGet.addEventListener("click", requestLyrics);
 els.btnClear.addEventListener("click", clearCache);
+
+loadSettings();
+prefillFromYouTube();
