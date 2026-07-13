@@ -1,6 +1,6 @@
-const SETTINGS_KEY = "settings_v2";
-const CACHE_PREFIX = "lyrics_v3_";
-const FAIL_PREFIX = "fail_v2_";
+const SETTINGS_KEY = "settings_v3";
+const CACHE_PREFIX = "lyrics_v4_";
+const FAIL_PREFIX = "fail_v3_";
 
 const DEFAULT_SETTINGS = {
   apiKey: "",
@@ -14,16 +14,17 @@ const MODEL_FALLBACKS = [
   "gemini-2.5-flash"
 ];
 
-const LYRICS_DOMAINS = [
+const LYRICS_HINTS = [
   "genius.com",
   "azlyrics.com",
   "lyrics.com",
   "musixmatch.com",
   "lyricstranslate.com",
   "jiosaavn.com",
-  "mero",
   "nepali",
-  "sajha"
+  "sajha",
+  "sansar",
+  "kosh"
 ];
 
 // -------------------- utils --------------------
@@ -72,7 +73,7 @@ function looksLikeMetaOutput(text) {
     text || ""
   );
 }
-function isValidLyricsExtraction(extracted, sourceText) {
+function isValidLyricsExtraction(extracted, sourceText, looseMode = false) {
   if (!extracted) return { ok: false, reason: "empty" };
   const out = extracted.trim();
   if (!out || out === "NOT_FOUND") return { ok: false, reason: "not_found" };
@@ -82,43 +83,36 @@ function isValidLyricsExtraction(extracted, sourceText) {
   if (lines.length < 4) return { ok: false, reason: "too_few_lines" };
 
   const score = overlapScore(out, sourceText);
-  if (score < 0.58) return { ok: false, reason: `low_overlap:${score.toFixed(2)}` };
+  const threshold = looseMode ? 0.50 : 0.58;
+  if (score < threshold) return { ok: false, reason: `low_overlap:${score.toFixed(2)}` };
 
   return { ok: true, score };
 }
-function orderedModels(primary) {
-  return [...new Set([primary, ...MODEL_FALLBACKS].filter(Boolean))];
-}
-function isLikelyLyricsDomain(url) {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return LYRICS_DOMAINS.some((d) => host.includes(d));
-  } catch {
-    return false;
-  }
-}
 function cleanupTitle(raw) {
   let t = (raw || "").replace(/\s*-\s*YouTube\s*$/i, "").trim();
-
   t = t
     .replace(/\[[^\]]*\]/g, " ")
-    .replace(/\((official|video|lyrics?|audio|hd|4k|live|mv|visualizer|performance|reaction|cover)[^)]*\)/gi, " ")
+    .replace(/\((official|video|lyrics?|audio|hd|4k|live|mv|visualizer|performance|reaction)[^)]*\)/gi, " ")
     .replace(/\b(official|video|lyrics?|audio|hd|4k|live|mv|visualizer)\b/gi, " ")
     .replace(/\|/g, " ")
     .replace(/-/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-
   return t;
 }
-function buildQueryVariants(rawTitle) {
+function buildQueryVariants(rawTitle, manualQuery = "") {
+  if (manualQuery && manualQuery.trim()) {
+    const q = manualQuery.trim();
+    return [...new Set([`"${q}" lyrics`, `${q} lyrics`, `${q} nepali lyrics`])];
+  }
+
   const clean = cleanupTitle(rawTitle);
   const parts = clean.split(" ").filter(Boolean);
 
   const first4 = parts.slice(0, 4).join(" ");
   const first6 = parts.slice(0, 6).join(" ");
 
-  const variants = [
+  return [...new Set([
     `"${clean}" lyrics`,
     `${clean} lyrics`,
     `${first6} lyrics`,
@@ -126,9 +120,18 @@ function buildQueryVariants(rawTitle) {
     `${clean} nepali lyrics`,
     `${first6} nepali lyrics`,
     `${first4} nepali song lyrics`
-  ].filter((q) => q.replace(/\s+/g, "").length > 0);
-
-  return [...new Set(variants)];
+  ].filter(Boolean))];
+}
+function orderedModels(primary) {
+  return [...new Set([primary, ...MODEL_FALLBACKS].filter(Boolean))];
+}
+function hostHasLyricsHint(url) {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return LYRICS_HINTS.some((x) => h.includes(x));
+  } catch {
+    return false;
+  }
 }
 
 // -------------------- settings --------------------
@@ -143,20 +146,15 @@ async function saveSettings(partial) {
   return next;
 }
 
-// -------------------- search + retrieval --------------------
+// -------------------- retrieval --------------------
 async function searchDuckDuckGo(query) {
   const q = encodeURIComponent(query);
   const url = `https://duckduckgo.com/html/?q=${q}`;
-
-  const res = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "text/html,*/*" }
-  });
+  const res = await fetch(url, { method: "GET", headers: { Accept: "text/html,*/*" } });
   if (!res.ok) throw new Error(`Search failed ${res.status}`);
-
   const html = await res.text();
-  const links = [];
 
+  const links = [];
   const re = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"/gi;
   let m;
   while ((m = re.exec(html))) {
@@ -183,65 +181,67 @@ async function searchDuckDuckGo(query) {
 }
 
 async function fetchPageText(url) {
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"
-    }
-  });
-  if (!res.ok) throw new Error(`Fetch failed ${res.status} ${url}`);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"
+      }
+    });
 
-  const html = await res.text();
-  const text = stripHtmlToText(html);
+    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
 
-  // require non-trivial text body
-  if (!text || text.length < 500) throw new Error("Insufficient source text");
+    const html = await res.text();
+    const text = stripHtmlToText(html);
 
-  return text;
+    if (!text || text.length < 500) return { ok: false, reason: "too_short" };
+
+    return { ok: true, text };
+  } catch (e) {
+    // CORS/network/etc
+    return { ok: false, reason: `fetch_error:${String(e.message || e)}` };
+  }
 }
 
-async function collectSourceTextsFromTitle(rawTitle, maxSourceChars) {
-  const queries = buildQueryVariants(rawTitle);
-  const allLinks = [];
+async function collectSourceTexts(rawTitle, manualQuery, maxSourceChars) {
+  const queries = buildQueryVariants(rawTitle, manualQuery);
+  const discovered = [];
 
-  // run multiple query variants
   for (const q of queries.slice(0, 5)) {
     try {
       const links = await searchDuckDuckGo(q);
-      allLinks.push(...links);
+      discovered.push(...links);
     } catch {}
     await sleep(100);
   }
 
-  const unique = [...new Set(allLinks)];
-
-  // rank: likely lyrics domains first, then shorter urls
+  const unique = [...new Set(discovered)];
   unique.sort((a, b) => {
-    const da = isLikelyLyricsDomain(a) ? 1 : 0;
-    const db = isLikelyLyricsDomain(b) ? 1 : 0;
+    const da = hostHasLyricsHint(a) ? 1 : 0;
+    const db = hostHasLyricsHint(b) ? 1 : 0;
     if (db !== da) return db - da;
     return a.length - b.length;
   });
 
-  const picked = unique.slice(0, 10);
+  const candidates = unique.slice(0, 12);
   const out = [];
 
-  for (const url of picked) {
-    try {
-      const text = await fetchPageText(url);
+  for (const url of candidates) {
+    const r = await fetchPageText(url);
+    if (r.ok) {
       out.push({
         sourceUrl: url,
         sourceDomain: new URL(url).hostname,
-        sourceText: text.slice(0, maxSourceChars)
+        sourceText: r.text.slice(0, maxSourceChars)
       });
-    } catch {}
+    }
     await sleep(120);
   }
 
   return out;
 }
 
-// -------------------- Gemini extraction --------------------
+// -------------------- Gemini --------------------
 function extractionPrompt(songTitle, sourceDomain, sourceText) {
   return `
 You are a strict text extractor.
@@ -290,6 +290,7 @@ async function callGeminiWithRetryAndFallback(args) {
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const result = await callGemini({ ...args, model });
+
       if (result.ok) return { ok: true, text: result.text, modelUsed: model };
 
       lastError = result.error || lastError;
@@ -298,8 +299,7 @@ async function callGeminiWithRetryAndFallback(args) {
       if (s === 401 || s === 403) return { ok: false, error: lastError };
       if (s === 404) break;
       if (s === 429 || s === 503) {
-        const backoff = [1200, 2500, 5000][attempt] || 5000;
-        await sleep(backoff);
+        await sleep([1200, 2500, 5000][attempt] || 5000);
         continue;
       }
       break;
@@ -309,13 +309,13 @@ async function callGeminiWithRetryAndFallback(args) {
   return { ok: false, error: lastError };
 }
 
-// -------------------- cache + cooldown --------------------
+// -------------------- cache/failure --------------------
 async function recentlyFailed(key) {
   const failKey = `${FAIL_PREFIX}${key}`;
   const got = await chrome.storage.local.get(failKey);
   const ts = got[failKey];
   if (!ts) return false;
-  return Date.now() - ts < 10 * 60 * 1000;
+  return Date.now() - ts < 8 * 60 * 1000;
 }
 async function markFail(key) {
   const failKey = `${FAIL_PREFIX}${key}`;
@@ -323,30 +323,29 @@ async function markFail(key) {
 }
 
 // -------------------- main flow --------------------
-async function handleLyricsRequest({ title }) {
-  const cleanTitle = cleanupTitle(title || "");
-  if (!cleanTitle) return { success: false, error: "Missing song title." };
+async function handleLyricsRequest({ title, manualQuery = "", looseMode = false }) {
+  const cleanedTitle = cleanupTitle(title || manualQuery || "");
+  if (!cleanedTitle) return { success: false, error: "Missing song title." };
 
   const settings = await getSettings();
-  if (!settings.apiKey) {
-    return { success: false, error: "Missing Gemini API key. Save it in popup settings first." };
-  }
+  if (!settings.apiKey) return { success: false, error: "Missing Gemini API key. Save it in Settings first." };
 
-  const norm = normalize(cleanTitle);
-  const cacheKey = `${CACHE_PREFIX}${norm}`;
+  const keyBase = manualQuery?.trim() ? manualQuery.trim() : cleanedTitle;
+  const norm = normalize(keyBase);
+  const cacheKey = `${CACHE_PREFIX}${norm}:${looseMode ? "loose" : "strict"}`;
 
   const cache = await chrome.storage.local.get(cacheKey);
   if (cache[cacheKey]) {
     return { success: true, source: "cache", lyrics: cache[cacheKey].lyrics, meta: cache[cacheKey].meta };
   }
 
-  if (await recentlyFailed(norm)) {
-    return { success: false, error: "Recent verification failed for this title. Try again in a few minutes." };
+  if (!manualQuery && (await recentlyFailed(norm))) {
+    return { success: false, error: "Recent verification failed. Try manual query or Retry (looser match)." };
   }
 
-  const sources = await collectSourceTextsFromTitle(cleanTitle, settings.maxSourceChars);
+  const sources = await collectSourceTexts(cleanedTitle, manualQuery, settings.maxSourceChars);
   if (!sources.length) {
-    await markFail(norm);
+    if (!manualQuery) await markFail(norm);
     return { success: false, error: "No source pages found for lyrics extraction." };
   }
 
@@ -354,24 +353,25 @@ async function handleLyricsRequest({ title }) {
     const extracted = await callGeminiWithRetryAndFallback({
       apiKey: settings.apiKey,
       model: settings.model,
-      songTitle: cleanTitle,
+      songTitle: cleanedTitle,
       sourceDomain: src.sourceDomain,
       sourceText: src.sourceText
     });
 
     if (!extracted.ok) continue;
 
-    const validation = isValidLyricsExtraction(extracted.text, src.sourceText);
+    const validation = isValidLyricsExtraction(extracted.text, src.sourceText, looseMode);
     if (!validation.ok) continue;
 
     const payload = {
       lyrics: extracted.text,
       meta: {
-        songTitle: cleanTitle,
+        songTitle: cleanedTitle,
         sourceDomain: src.sourceDomain,
         sourceUrl: src.sourceUrl,
         modelUsed: extracted.modelUsed,
-        validation
+        validation,
+        looseMode
       }
     };
 
@@ -385,11 +385,11 @@ async function handleLyricsRequest({ title }) {
     };
   }
 
-  await markFail(norm);
+  if (!manualQuery) await markFail(norm);
   return { success: false, error: "Unable to verify lyrics from fetched sources." };
 }
 
-// -------------------- API test --------------------
+// -------------------- test api --------------------
 async function testApi({ apiKey, model }) {
   if (!apiKey) return { success: false, error: "API key missing." };
 
@@ -416,10 +416,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         case "getSettings": {
           const s = await getSettings();
-          sendResponse({
-            success: true,
-            settings: { ...s, apiKey: s.apiKey ? "********" : "" }
-          });
+          sendResponse({ success: true, settings: { ...s, apiKey: s.apiKey ? "********" : "" } });
           return;
         }
 
@@ -428,10 +425,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             apiKey: (msg.apiKey || "").trim(),
             model: (msg.model || DEFAULT_SETTINGS.model).trim()
           });
-          sendResponse({
-            success: true,
-            settings: { ...next, apiKey: next.apiKey ? "********" : "" }
-          });
+          sendResponse({ success: true, settings: { ...next, apiKey: next.apiKey ? "********" : "" } });
           return;
         }
 
@@ -442,16 +436,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             model: (msg.model || cur.model || DEFAULT_SETTINGS.model).trim()
           });
 
-          if (res.success && res.modelUsed) {
-            await saveSettings({ model: res.modelUsed });
-          }
-
+          if (res.success && res.modelUsed) await saveSettings({ model: res.modelUsed });
           sendResponse(res);
           return;
         }
 
         case "getLyricsForTitle": {
-          const res = await handleLyricsRequest({ title: msg.title || "" });
+          const res = await handleLyricsRequest({
+            title: msg.title || "",
+            manualQuery: msg.manualQuery || "",
+            looseMode: !!msg.looseMode
+          });
           sendResponse(res);
           return;
         }
