@@ -1,11 +1,10 @@
-const SETTINGS_KEY = "settings_v3";
-const CACHE_PREFIX = "lyrics_v4_";
-const FAIL_PREFIX = "fail_v3_";
+const SETTINGS_KEY = "settings_v4";
+const CACHE_PREFIX = "lyrics_v5_";
 
 const DEFAULT_SETTINGS = {
   apiKey: "",
   model: "gemini-3.1-flash-lite",
-  maxSourceChars: 24000
+  maxSourceChars: 18000
 };
 
 const MODEL_FALLBACKS = [
@@ -14,42 +13,22 @@ const MODEL_FALLBACKS = [
   "gemini-2.5-flash"
 ];
 
-const LYRICS_HINTS = [
-  "genius.com",
-  "azlyrics.com",
-  "lyrics.com",
-  "musixmatch.com",
-  "lyricstranslate.com",
-  "jiosaavn.com",
-  "nepali",
-  "sajha",
-  "sansar",
-  "kosh"
-];
-
-// -------------------- utils --------------------
+// ---------- utils ----------
 function normalize(str) {
   return (str || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "").trim();
 }
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-function stripHtmlToText(html) {
-  return (html || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
-    .replace(/<[^>]+>/g, "\n")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\r/g, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function cleanTitle(raw) {
+  return (raw || "")
+    .replace(/\s*-\s*YouTube\s*$/i, "")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\((official|video|lyrics?|audio|hd|4k|live|mv|visualizer|performance|reaction)[^)]*\)/gi, " ")
+    .replace(/\|/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
+
 function normalizeForTokens(t) {
   return (t || "")
     .toLowerCase()
@@ -69,9 +48,7 @@ function overlapScore(extracted, source) {
   return hit / a.size;
 }
 function looksLikeMetaOutput(text) {
-  return /here (are|is)|lyrics for|i can('|’)t|sorry|note:|explanation|analysis|translation|markdown|as an ai/i.test(
-    text || ""
-  );
+  return /here (are|is)|lyrics for|i can('|’)t|sorry|note:|explanation|analysis|translation|markdown|as an ai/i.test(text || "");
 }
 function isValidLyricsExtraction(extracted, sourceText, looseMode = false) {
   if (!extracted) return { ok: false, reason: "empty" };
@@ -79,62 +56,17 @@ function isValidLyricsExtraction(extracted, sourceText, looseMode = false) {
   if (!out || out === "NOT_FOUND") return { ok: false, reason: "not_found" };
   if (looksLikeMetaOutput(out)) return { ok: false, reason: "meta_output" };
 
-  const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 4) return { ok: false, reason: "too_few_lines" };
+  const lines = out.split("\n").map((x) => x.trim()).filter(Boolean);
+  if (lines.length < 3) return { ok: false, reason: "too_few_lines" };
 
   const score = overlapScore(out, sourceText);
-  const threshold = looseMode ? 0.50 : 0.58;
+  const threshold = looseMode ? 0.45 : 0.55;
   if (score < threshold) return { ok: false, reason: `low_overlap:${score.toFixed(2)}` };
 
   return { ok: true, score };
 }
-function cleanupTitle(raw) {
-  let t = (raw || "").replace(/\s*-\s*YouTube\s*$/i, "").trim();
-  t = t
-    .replace(/\[[^\]]*\]/g, " ")
-    .replace(/\((official|video|lyrics?|audio|hd|4k|live|mv|visualizer|performance|reaction)[^)]*\)/gi, " ")
-    .replace(/\b(official|video|lyrics?|audio|hd|4k|live|mv|visualizer)\b/gi, " ")
-    .replace(/\|/g, " ")
-    .replace(/-/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return t;
-}
-function buildQueryVariants(rawTitle, manualQuery = "") {
-  if (manualQuery && manualQuery.trim()) {
-    const q = manualQuery.trim();
-    return [...new Set([`"${q}" lyrics`, `${q} lyrics`, `${q} nepali lyrics`])];
-  }
 
-  const clean = cleanupTitle(rawTitle);
-  const parts = clean.split(" ").filter(Boolean);
-
-  const first4 = parts.slice(0, 4).join(" ");
-  const first6 = parts.slice(0, 6).join(" ");
-
-  return [...new Set([
-    `"${clean}" lyrics`,
-    `${clean} lyrics`,
-    `${first6} lyrics`,
-    `${first4} lyrics`,
-    `${clean} nepali lyrics`,
-    `${first6} nepali lyrics`,
-    `${first4} nepali song lyrics`
-  ].filter(Boolean))];
-}
-function orderedModels(primary) {
-  return [...new Set([primary, ...MODEL_FALLBACKS].filter(Boolean))];
-}
-function hostHasLyricsHint(url) {
-  try {
-    const h = new URL(url).hostname.toLowerCase();
-    return LYRICS_HINTS.some((x) => h.includes(x));
-  } catch {
-    return false;
-  }
-}
-
-// -------------------- settings --------------------
+// ---------- settings ----------
 async function getSettings() {
   const data = await chrome.storage.sync.get(SETTINGS_KEY);
   return { ...DEFAULT_SETTINGS, ...(data[SETTINGS_KEY] || {}) };
@@ -146,126 +78,33 @@ async function saveSettings(partial) {
   return next;
 }
 
-// -------------------- retrieval --------------------
-async function searchDuckDuckGo(query) {
-  const q = encodeURIComponent(query);
-  const url = `https://duckduckgo.com/html/?q=${q}`;
-  const res = await fetch(url, { method: "GET", headers: { Accept: "text/html,*/*" } });
-  if (!res.ok) throw new Error(`Search failed ${res.status}`);
-  const html = await res.text();
-
-  const links = [];
-  const re = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"/gi;
-  let m;
-  while ((m = re.exec(html))) {
-    let href = m[1];
-    try {
-      const u = new URL(href, "https://duckduckgo.com");
-      const uddg = u.searchParams.get("uddg");
-      if (uddg) href = decodeURIComponent(uddg);
-      if (/^https?:\/\//i.test(href)) links.push(href);
-    } catch {}
-    if (links.length >= 12) break;
-  }
-
-  if (!links.length) {
-    const fallback = html.match(/https?:\/\/[^\s"'<>]+/g) || [];
-    for (const x of fallback) {
-      if (/duckduckgo\.com/.test(x)) continue;
-      links.push(x);
-      if (links.length >= 12) break;
-    }
-  }
-
-  return [...new Set(links)];
+// ---------- Gemini ----------
+function orderedModels(primary) {
+  return [...new Set([primary, ...MODEL_FALLBACKS].filter(Boolean))];
 }
-
-async function fetchPageText(url) {
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"
-      }
-    });
-
-    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
-
-    const html = await res.text();
-    const text = stripHtmlToText(html);
-
-    if (!text || text.length < 500) return { ok: false, reason: "too_short" };
-
-    return { ok: true, text };
-  } catch (e) {
-    // CORS/network/etc
-    return { ok: false, reason: `fetch_error:${String(e.message || e)}` };
-  }
-}
-
-async function collectSourceTexts(rawTitle, manualQuery, maxSourceChars) {
-  const queries = buildQueryVariants(rawTitle, manualQuery);
-  const discovered = [];
-
-  for (const q of queries.slice(0, 5)) {
-    try {
-      const links = await searchDuckDuckGo(q);
-      discovered.push(...links);
-    } catch {}
-    await sleep(100);
-  }
-
-  const unique = [...new Set(discovered)];
-  unique.sort((a, b) => {
-    const da = hostHasLyricsHint(a) ? 1 : 0;
-    const db = hostHasLyricsHint(b) ? 1 : 0;
-    if (db !== da) return db - da;
-    return a.length - b.length;
-  });
-
-  const candidates = unique.slice(0, 12);
-  const out = [];
-
-  for (const url of candidates) {
-    const r = await fetchPageText(url);
-    if (r.ok) {
-      out.push({
-        sourceUrl: url,
-        sourceDomain: new URL(url).hostname,
-        sourceText: r.text.slice(0, maxSourceChars)
-      });
-    }
-    await sleep(120);
-  }
-
-  return out;
-}
-
-// -------------------- Gemini --------------------
-function extractionPrompt(songTitle, sourceDomain, sourceText) {
+function extractionPrompt(songTitle, sourceName, sourceText) {
   return `
 You are a strict text extractor.
 Task: extract only song lyrics for "${songTitle}" from SOURCE_TEXT.
 
 Rules:
-1) Use ONLY words already present in SOURCE_TEXT.
-2) Do NOT paraphrase, complete, infer, or generate missing lines.
-3) If clear lyrics are not present, return exactly: NOT_FOUND
-4) Return plain text only, preserving lyric line breaks.
-5) No commentary, no markdown, no explanation.
+1) Use ONLY words present in SOURCE_TEXT.
+2) Do NOT infer or generate missing lines.
+3) If lyrics are not clearly present, return exactly: NOT_FOUND
+4) Plain text only, preserve line breaks.
+5) No commentary.
 
-SOURCE_DOMAIN: ${sourceDomain}
+SOURCE_NAME: ${sourceName}
 SOURCE_TEXT:
 ${sourceText}
 `.trim();
 }
-
-async function callGemini({ apiKey, model, songTitle, sourceDomain, sourceText }) {
+async function callGemini({ apiKey, model, songTitle, sourceName, sourceText }) {
   const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const body = {
-    contents: [{ parts: [{ text: extractionPrompt(songTitle, sourceDomain, sourceText) }] }],
-    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1400 }
+    contents: [{ parts: [{ text: extractionPrompt(songTitle, sourceName, sourceText) }] }],
+    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1200 }
   };
 
   const res = await fetch(url, {
@@ -275,151 +114,238 @@ async function callGemini({ apiKey, model, songTitle, sourceDomain, sourceText }
   });
 
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return { ok: false, status: res.status, error: data?.error?.message || `Gemini HTTP ${res.status}` };
-  }
+  if (!res.ok) return { ok: false, status: res.status, error: data?.error?.message || `HTTP ${res.status}` };
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
   return { ok: true, text };
 }
-
-async function callGeminiWithRetryAndFallback(args) {
+async function callGeminiWithFallback(args) {
   const models = orderedModels(args.model);
   let lastError = "Unknown Gemini error";
 
-  for (const model of models) {
+  for (const m of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const result = await callGemini({ ...args, model });
+      const r = await callGemini({ ...args, model: m });
+      if (r.ok) return { ok: true, text: r.text, modelUsed: m };
 
-      if (result.ok) return { ok: true, text: result.text, modelUsed: model };
-
-      lastError = result.error || lastError;
-      const s = result.status || 0;
-
-      if (s === 401 || s === 403) return { ok: false, error: lastError };
-      if (s === 404) break;
-      if (s === 429 || s === 503) {
+      lastError = r.error || lastError;
+      if (r.status === 401 || r.status === 403) return { ok: false, error: lastError };
+      if (r.status === 404) break; // next model
+      if (r.status === 429 || r.status === 503) {
         await sleep([1200, 2500, 5000][attempt] || 5000);
         continue;
       }
       break;
     }
   }
-
   return { ok: false, error: lastError };
 }
 
-// -------------------- cache/failure --------------------
-async function recentlyFailed(key) {
-  const failKey = `${FAIL_PREFIX}${key}`;
-  const got = await chrome.storage.local.get(failKey);
-  const ts = got[failKey];
-  if (!ts) return false;
-  return Date.now() - ts < 8 * 60 * 1000;
-}
-async function markFail(key) {
-  const failKey = `${FAIL_PREFIX}${key}`;
-  await chrome.storage.local.set({ [failKey]: Date.now() });
+// ---------- Source strategy (CORS-safe) ----------
+
+// 1) Try to extract useful text directly from active YouTube tab
+async function getYouTubePageTextFromActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab?.url?.includes("youtube.com/watch")) return null;
+
+  const injected = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const chunks = [];
+
+      // title and meta
+      const title = document.title || "";
+      chunks.push(title);
+
+      // description area text
+      const desc = document.querySelector("#description, #description-inline-expander, ytd-text-inline-expander");
+      if (desc?.innerText) chunks.push(desc.innerText);
+
+      // transcript panel text (if open/available)
+      const transcriptNodes = document.querySelectorAll("ytd-transcript-segment-renderer, .segment-text, #segments-container *");
+      if (transcriptNodes.length) {
+        const t = Array.from(transcriptNodes).map(n => n.innerText || "").join("\n");
+        if (t.trim()) chunks.push(t);
+      }
+
+      // generic fallback text sample from page
+      const bodyText = (document.body?.innerText || "").slice(0, 12000);
+      if (bodyText.trim()) chunks.push(bodyText);
+
+      return chunks.join("\n\n").trim();
+    }
+  });
+
+  return injected?.[0]?.result || null;
 }
 
-// -------------------- main flow --------------------
+// 2) DuckDuckGo snippets only (no external page fetch)
+async function searchDuckDuckGoSnippets(query) {
+  const q = encodeURIComponent(query);
+  const url = `https://duckduckgo.com/html/?q=${q}`;
+  const res = await fetch(url, { method: "GET", headers: { Accept: "text/html,*/*" } });
+  if (!res.ok) return [];
+
+  const html = await res.text();
+
+  // extract snippet texts
+  const snippets = [];
+  const snippetRegexes = [
+    /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi,
+    /<div[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/gi
+  ];
+
+  for (const re of snippetRegexes) {
+    let m;
+    while ((m = re.exec(html))) {
+      const text = m[1]
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text.length > 60) snippets.push(text);
+      if (snippets.length >= 20) break;
+    }
+    if (snippets.length >= 20) break;
+  }
+
+  return [...new Set(snippets)];
+}
+
+function buildQueries(title, manualQuery) {
+  const t = cleanTitle(manualQuery || title || "");
+  const parts = t.split(" ").filter(Boolean);
+  const p4 = parts.slice(0, 4).join(" ");
+  const p6 = parts.slice(0, 6).join(" ");
+
+  return [...new Set([
+    `"${t}" lyrics`,
+    `${t} lyrics`,
+    `${p6} lyrics`,
+    `${p4} lyrics`,
+    `${t} nepali lyrics`,
+    `${p6} nepali song lyrics`
+  ].filter((x) => x.trim().length > 0))];
+}
+
+async function collectSources({ title, manualQuery, maxSourceChars }) {
+  const sources = [];
+
+  // youtube source
+  const ytText = await getYouTubePageTextFromActiveTab();
+  if (ytText && ytText.length > 500) {
+    sources.push({
+      sourceName: "youtube_page_text",
+      sourceText: ytText.slice(0, maxSourceChars)
+    });
+  }
+
+  // ddg snippets source(s)
+  const queries = buildQueries(title, manualQuery);
+  for (const q of queries.slice(0, 4)) {
+    const snippets = await searchDuckDuckGoSnippets(q);
+    if (snippets.length) {
+      const joined = snippets.join("\n");
+      if (joined.length > 300) {
+        sources.push({
+          sourceName: `duckduckgo_snippets:${q}`,
+          sourceText: joined.slice(0, maxSourceChars)
+        });
+      }
+    }
+    await sleep(100);
+  }
+
+  return sources;
+}
+
+// ---------- main ----------
 async function handleLyricsRequest({ title, manualQuery = "", looseMode = false }) {
-  const cleanedTitle = cleanupTitle(title || manualQuery || "");
-  if (!cleanedTitle) return { success: false, error: "Missing song title." };
+  const queryTitle = cleanTitle(manualQuery || title || "");
+  if (!queryTitle) return { success: false, error: "Missing song title." };
 
   const settings = await getSettings();
-  if (!settings.apiKey) return { success: false, error: "Missing Gemini API key. Save it in Settings first." };
+  if (!settings.apiKey) return { success: false, error: "Missing Gemini API key. Save it in Settings." };
 
-  const keyBase = manualQuery?.trim() ? manualQuery.trim() : cleanedTitle;
-  const norm = normalize(keyBase);
-  const cacheKey = `${CACHE_PREFIX}${norm}:${looseMode ? "loose" : "strict"}`;
-
-  const cache = await chrome.storage.local.get(cacheKey);
-  if (cache[cacheKey]) {
-    return { success: true, source: "cache", lyrics: cache[cacheKey].lyrics, meta: cache[cacheKey].meta };
+  const cacheKey = `${CACHE_PREFIX}${normalize(queryTitle)}:${looseMode ? "loose" : "strict"}`;
+  const c = await chrome.storage.local.get(cacheKey);
+  if (c[cacheKey]) {
+    return { success: true, source: "cache", lyrics: c[cacheKey].lyrics, meta: c[cacheKey].meta };
   }
 
-  if (!manualQuery && (await recentlyFailed(norm))) {
-    return { success: false, error: "Recent verification failed. Try manual query or Retry (looser match)." };
-  }
+  const sources = await collectSources({
+    title: queryTitle,
+    manualQuery,
+    maxSourceChars: settings.maxSourceChars
+  });
 
-  const sources = await collectSourceTexts(cleanedTitle, manualQuery, settings.maxSourceChars);
   if (!sources.length) {
-    if (!manualQuery) await markFail(norm);
-    return { success: false, error: "No source pages found for lyrics extraction." };
+    return {
+      success: false,
+      error: "No usable source text found. Try manual search title with artist name."
+    };
   }
 
   for (const src of sources) {
-    const extracted = await callGeminiWithRetryAndFallback({
+    const ext = await callGeminiWithFallback({
       apiKey: settings.apiKey,
       model: settings.model,
-      songTitle: cleanedTitle,
-      sourceDomain: src.sourceDomain,
+      songTitle: queryTitle,
+      sourceName: src.sourceName,
       sourceText: src.sourceText
     });
 
-    if (!extracted.ok) continue;
+    if (!ext.ok) continue;
 
-    const validation = isValidLyricsExtraction(extracted.text, src.sourceText, looseMode);
-    if (!validation.ok) continue;
+    const valid = isValidLyricsExtraction(ext.text, src.sourceText, looseMode);
+    if (!valid.ok) continue;
 
     const payload = {
-      lyrics: extracted.text,
+      lyrics: ext.text,
       meta: {
-        songTitle: cleanedTitle,
-        sourceDomain: src.sourceDomain,
-        sourceUrl: src.sourceUrl,
-        modelUsed: extracted.modelUsed,
-        validation,
+        sourceName: src.sourceName,
+        modelUsed: ext.modelUsed,
+        validation: valid,
         looseMode
       }
     };
 
     await chrome.storage.local.set({ [cacheKey]: payload });
-
-    return {
-      success: true,
-      source: "verified_extraction",
-      lyrics: payload.lyrics,
-      meta: payload.meta
-    };
+    return { success: true, source: "verified_extraction", lyrics: payload.lyrics, meta: payload.meta };
   }
 
-  if (!manualQuery) await markFail(norm);
-  return { success: false, error: "Unable to verify lyrics from fetched sources." };
+  return {
+    success: false,
+    error: "Could not verify lyrics from available source text. Try manual title: '<song> <artist> lyrics'."
+  };
 }
 
-// -------------------- test api --------------------
 async function testApi({ apiKey, model }) {
   if (!apiKey) return { success: false, error: "API key missing." };
-
-  const probe = await callGeminiWithRetryAndFallback({
+  const r = await callGeminiWithFallback({
     apiKey,
-    model: model || DEFAULT_SETTINGS.model,
-    songTitle: "Test Song",
-    sourceDomain: "example.com",
-    sourceText: "hello world NOT_FOUND"
+    model,
+    songTitle: "test",
+    sourceName: "probe",
+    sourceText: "line one\nline two\nline three"
   });
-
-  if (!probe.ok) return { success: false, error: probe.error };
-  return { success: true, modelUsed: probe.modelUsed };
+  if (!r.ok) return { success: false, error: r.error };
+  return { success: true, modelUsed: r.modelUsed };
 }
 
-// -------------------- message router --------------------
+// ---------- router ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       switch (msg?.action) {
-        case "ping":
-          sendResponse({ pong: true });
-          return;
-
         case "getSettings": {
           const s = await getSettings();
           sendResponse({ success: true, settings: { ...s, apiKey: s.apiKey ? "********" : "" } });
           return;
         }
-
         case "saveSettings": {
           const next = await saveSettings({
             apiKey: (msg.apiKey || "").trim(),
@@ -428,19 +354,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ success: true, settings: { ...next, apiKey: next.apiKey ? "********" : "" } });
           return;
         }
-
         case "testApi": {
           const cur = await getSettings();
           const res = await testApi({
             apiKey: (msg.apiKey || cur.apiKey || "").trim(),
             model: (msg.model || cur.model || DEFAULT_SETTINGS.model).trim()
           });
-
           if (res.success && res.modelUsed) await saveSettings({ model: res.modelUsed });
           sendResponse(res);
           return;
         }
-
         case "getLyricsForTitle": {
           const res = await handleLyricsRequest({
             title: msg.title || "",
@@ -450,12 +373,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse(res);
           return;
         }
-
         case "clearCache":
           await chrome.storage.local.clear();
           sendResponse({ success: true });
           return;
-
         default:
           sendResponse({ success: false, error: "Unknown action." });
       }
@@ -463,6 +384,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ success: false, error: e.message || String(e) });
     }
   })();
-
   return true;
 });
