@@ -1,11 +1,11 @@
-const SETTINGS_KEY = "settings_v1";
-const CACHE_PREFIX = "lyrics_v2_";
-const FAIL_PREFIX = "fail_v1_";
+const SETTINGS_KEY = "settings_v2";
+const CACHE_PREFIX = "lyrics_v3_";
+const FAIL_PREFIX = "fail_v2_";
 
 const DEFAULT_SETTINGS = {
   apiKey: "",
   model: "gemini-3.1-flash-lite",
-  maxSourceChars: 22000
+  maxSourceChars: 24000
 };
 
 const MODEL_FALLBACKS = [
@@ -14,9 +14,21 @@ const MODEL_FALLBACKS = [
   "gemini-2.5-flash"
 ];
 
+const LYRICS_DOMAINS = [
+  "genius.com",
+  "azlyrics.com",
+  "lyrics.com",
+  "musixmatch.com",
+  "lyricstranslate.com",
+  "jiosaavn.com",
+  "mero",
+  "nepali",
+  "sajha"
+];
+
 // -------------------- utils --------------------
 function normalize(str) {
-  return (str || "").toLowerCase().replace(/[^\w]+/g, "").trim();
+  return (str || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "").trim();
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -40,7 +52,7 @@ function stripHtmlToText(html) {
 function normalizeForTokens(t) {
   return (t || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\u0900-\u097f\s'\n-]/g, " ")
+    .replace(/[^\p{L}\p{N}\s'\n-]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -70,21 +82,53 @@ function isValidLyricsExtraction(extracted, sourceText) {
   if (lines.length < 4) return { ok: false, reason: "too_few_lines" };
 
   const score = overlapScore(out, sourceText);
-  if (score < 0.62) return { ok: false, reason: `low_overlap:${score.toFixed(2)}` };
+  if (score < 0.58) return { ok: false, reason: `low_overlap:${score.toFixed(2)}` };
 
   return { ok: true, score };
 }
-function extractSongQueryFromTitle(rawTitle) {
-  let title = (rawTitle || "").replace(/\s*-\s*YouTube\s*$/i, "").trim();
-  title = title
-    .replace(/\[(.*?)\]/g, " ")
-    .replace(/\((official|video|lyrics?|audio|hd|4k|live|mv|visualizer|performance).*?\)/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return title;
-}
 function orderedModels(primary) {
   return [...new Set([primary, ...MODEL_FALLBACKS].filter(Boolean))];
+}
+function isLikelyLyricsDomain(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return LYRICS_DOMAINS.some((d) => host.includes(d));
+  } catch {
+    return false;
+  }
+}
+function cleanupTitle(raw) {
+  let t = (raw || "").replace(/\s*-\s*YouTube\s*$/i, "").trim();
+
+  t = t
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\((official|video|lyrics?|audio|hd|4k|live|mv|visualizer|performance|reaction|cover)[^)]*\)/gi, " ")
+    .replace(/\b(official|video|lyrics?|audio|hd|4k|live|mv|visualizer)\b/gi, " ")
+    .replace(/\|/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return t;
+}
+function buildQueryVariants(rawTitle) {
+  const clean = cleanupTitle(rawTitle);
+  const parts = clean.split(" ").filter(Boolean);
+
+  const first4 = parts.slice(0, 4).join(" ");
+  const first6 = parts.slice(0, 6).join(" ");
+
+  const variants = [
+    `"${clean}" lyrics`,
+    `${clean} lyrics`,
+    `${first6} lyrics`,
+    `${first4} lyrics`,
+    `${clean} nepali lyrics`,
+    `${first6} nepali lyrics`,
+    `${first4} nepali song lyrics`
+  ].filter((q) => q.replace(/\s+/g, "").length > 0);
+
+  return [...new Set(variants)];
 }
 
 // -------------------- settings --------------------
@@ -100,24 +144,8 @@ async function saveSettings(partial) {
 }
 
 // -------------------- search + retrieval --------------------
-function isLikelyLyricsDomain(url) {
-  try {
-    const h = new URL(url).hostname.toLowerCase();
-    return [
-      "genius.com",
-      "azlyrics.com",
-      "lyrics.com",
-      "musixmatch.com",
-      "lyricstranslate.com",
-      "jiosaavn.com"
-    ].some((d) => h === d || h.endsWith("." + d));
-  } catch {
-    return false;
-  }
-}
-
-async function searchDuckDuckGo(songQuery) {
-  const q = encodeURIComponent(`"${songQuery}" lyrics`);
+async function searchDuckDuckGo(query) {
+  const q = encodeURIComponent(query);
   const url = `https://duckduckgo.com/html/?q=${q}`;
 
   const res = await fetch(url, {
@@ -142,10 +170,9 @@ async function searchDuckDuckGo(songQuery) {
     if (links.length >= 12) break;
   }
 
-  // fallback regex for occasional layout changes
   if (!links.length) {
-    const alt = html.match(/https?:\/\/[^\s"'<>]+/g) || [];
-    for (const x of alt) {
+    const fallback = html.match(/https?:\/\/[^\s"'<>]+/g) || [];
+    for (const x of fallback) {
       if (/duckduckgo\.com/.test(x)) continue;
       links.push(x);
       if (links.length >= 12) break;
@@ -162,30 +189,51 @@ async function fetchPageText(url) {
       Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8"
     }
   });
-  if (!res.ok) throw new Error(`Fetch failed ${res.status} for ${url}`);
+  if (!res.ok) throw new Error(`Fetch failed ${res.status} ${url}`);
+
   const html = await res.text();
-  return stripHtmlToText(html);
+  const text = stripHtmlToText(html);
+
+  // require non-trivial text body
+  if (!text || text.length < 500) throw new Error("Insufficient source text");
+
+  return text;
 }
 
-async function collectSourceTexts(songQuery, maxSourceChars) {
-  const resultLinks = await searchDuckDuckGo(songQuery);
+async function collectSourceTextsFromTitle(rawTitle, maxSourceChars) {
+  const queries = buildQueryVariants(rawTitle);
+  const allLinks = [];
 
-  // prioritize likely lyrics domains first
-  resultLinks.sort((a, b) => Number(isLikelyLyricsDomain(b)) - Number(isLikelyLyricsDomain(a)));
+  // run multiple query variants
+  for (const q of queries.slice(0, 5)) {
+    try {
+      const links = await searchDuckDuckGo(q);
+      allLinks.push(...links);
+    } catch {}
+    await sleep(100);
+  }
 
-  const picked = resultLinks.slice(0, 7);
+  const unique = [...new Set(allLinks)];
+
+  // rank: likely lyrics domains first, then shorter urls
+  unique.sort((a, b) => {
+    const da = isLikelyLyricsDomain(a) ? 1 : 0;
+    const db = isLikelyLyricsDomain(b) ? 1 : 0;
+    if (db !== da) return db - da;
+    return a.length - b.length;
+  });
+
+  const picked = unique.slice(0, 10);
   const out = [];
 
   for (const url of picked) {
     try {
       const text = await fetchPageText(url);
-      if (text.length > 700) {
-        out.push({
-          sourceUrl: url,
-          sourceDomain: new URL(url).hostname,
-          sourceText: text.slice(0, maxSourceChars)
-        });
-      }
+      out.push({
+        sourceUrl: url,
+        sourceDomain: new URL(url).hostname,
+        sourceText: text.slice(0, maxSourceChars)
+      });
     } catch {}
     await sleep(120);
   }
@@ -216,16 +264,8 @@ async function callGemini({ apiKey, model, songTitle, sourceDomain, sourceText }
   const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const body = {
-    contents: [
-      {
-        parts: [{ text: extractionPrompt(songTitle, sourceDomain, sourceText) }]
-      }
-    ],
-    generationConfig: {
-      temperature: 0,
-      topP: 0.1,
-      maxOutputTokens: 1400
-    }
+    contents: [{ parts: [{ text: extractionPrompt(songTitle, sourceDomain, sourceText) }] }],
+    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1400 }
   };
 
   const res = await fetch(url, {
@@ -236,11 +276,7 @@ async function callGemini({ apiKey, model, songTitle, sourceDomain, sourceText }
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    return {
-      ok: false,
-      status: res.status,
-      error: data?.error?.message || `Gemini HTTP ${res.status}`
-    };
+    return { ok: false, status: res.status, error: data?.error?.message || `Gemini HTTP ${res.status}` };
   }
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
@@ -254,15 +290,14 @@ async function callGeminiWithRetryAndFallback(args) {
   for (const model of models) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const result = await callGemini({ ...args, model });
-
       if (result.ok) return { ok: true, text: result.text, modelUsed: model };
 
       lastError = result.error || lastError;
-      const status = result.status || 0;
+      const s = result.status || 0;
 
-      if (status === 401 || status === 403) return { ok: false, error: lastError };
-      if (status === 404) break; // next model
-      if (status === 429 || status === 503) {
+      if (s === 401 || s === 403) return { ok: false, error: lastError };
+      if (s === 404) break;
+      if (s === 429 || s === 503) {
         const backoff = [1200, 2500, 5000][attempt] || 5000;
         await sleep(backoff);
         continue;
@@ -274,7 +309,7 @@ async function callGeminiWithRetryAndFallback(args) {
   return { ok: false, error: lastError };
 }
 
-// -------------------- cache/failure cooldown --------------------
+// -------------------- cache + cooldown --------------------
 async function recentlyFailed(key) {
   const failKey = `${FAIL_PREFIX}${key}`;
   const got = await chrome.storage.local.get(failKey);
@@ -289,7 +324,7 @@ async function markFail(key) {
 
 // -------------------- main flow --------------------
 async function handleLyricsRequest({ title }) {
-  const cleanTitle = extractSongQueryFromTitle(title || "");
+  const cleanTitle = cleanupTitle(title || "");
   if (!cleanTitle) return { success: false, error: "Missing song title." };
 
   const settings = await getSettings();
@@ -297,29 +332,21 @@ async function handleLyricsRequest({ title }) {
     return { success: false, error: "Missing Gemini API key. Save it in popup settings first." };
   }
 
-  const key = normalize(cleanTitle);
-  const cacheKey = `${CACHE_PREFIX}${key}`;
+  const norm = normalize(cleanTitle);
+  const cacheKey = `${CACHE_PREFIX}${norm}`;
 
   const cache = await chrome.storage.local.get(cacheKey);
   if (cache[cacheKey]) {
-    return {
-      success: true,
-      source: "cache",
-      lyrics: cache[cacheKey].lyrics,
-      meta: cache[cacheKey].meta
-    };
+    return { success: true, source: "cache", lyrics: cache[cacheKey].lyrics, meta: cache[cacheKey].meta };
   }
 
-  if (await recentlyFailed(key)) {
-    return {
-      success: false,
-      error: "Recent verification failed for this title. Try again in a few minutes."
-    };
+  if (await recentlyFailed(norm)) {
+    return { success: false, error: "Recent verification failed for this title. Try again in a few minutes." };
   }
 
-  const sources = await collectSourceTexts(cleanTitle, settings.maxSourceChars);
+  const sources = await collectSourceTextsFromTitle(cleanTitle, settings.maxSourceChars);
   if (!sources.length) {
-    await markFail(key);
+    await markFail(norm);
     return { success: false, error: "No source pages found for lyrics extraction." };
   }
 
@@ -358,7 +385,7 @@ async function handleLyricsRequest({ title }) {
     };
   }
 
-  await markFail(key);
+  await markFail(norm);
   return { success: false, error: "Unable to verify lyrics from fetched sources." };
 }
 
@@ -391,10 +418,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const s = await getSettings();
           sendResponse({
             success: true,
-            settings: {
-              ...s,
-              apiKey: s.apiKey ? "********" : ""
-            }
+            settings: { ...s, apiKey: s.apiKey ? "********" : "" }
           });
           return;
         }
