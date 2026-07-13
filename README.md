@@ -1,40 +1,65 @@
-# YouTube Lyrics Helper (AI) — Project Report & Setup
+# YouTube Lyrics — Gemini (Browser Extension)
 
-## Project summary
-YouTube Lyrics Helper is a browser extension (proof-of-concept) that:
-- Detects the currently viewed YouTube video title (and normalizes it).
-- Lets the user approve a URL as the authoritative lyrics source for that song.
-- Fetches the approved URL's HTML via the extension's background script (avoiding CORS).
-- Uses a **local LLM (Ollama)** to extract only the song lyrics from the HTML.
-- Displays the cleaned lyrics in the YouTube sidebar.
-- Falls back to a heuristic extractor if the local AI is unavailable.
+A Manifest V3 browser extension that fetches song lyrics for YouTube videos using the Gemini API.
 
-This design keeps all user data local (the pages and extraction run on the user's machine). No paid cloud API is required if you run Ollama locally.
+## Features
 
-## Files in repo
-- `manifest.json` - Extension manifest (MV2, Firefox-friendly)
-- `content.js` - Content script injected into YouTube pages
-- `background.js` - Background script: fetch & call local Ollama
-- `styles.css` - Styling for sidebar box
-- `README.md` - This file
+- Detects current YouTube video title
+- Fetches lyrics via Gemini API
+- Caches lyrics in extension storage for faster repeat loads
+- Popup UI for:
+  - Saving API key
+  - Fetching lyrics
+  - Clearing cache
+- On-page panel support via content script on YouTube pages
 
-## How the AI integration works
-- The extension sends the full page HTML to the background script.
-- Background makes a `POST http://localhost:11434/api/generate` call to your local Ollama server with a concise prompt to "Extract ONLY the song lyrics".
-- Ollama returns generated text; the extension displays it.
-- If Ollama is not running, the extension falls back to a heuristic HTML-based extractor.
+## Project structure
 
-> Ollama exposes a local API at `http://localhost:11434` with endpoints such as `/api/generate`. See Ollama API docs. :contentReference[oaicite:2]{index=2}
+- `manifest.json` — MV3 manifest and permissions
+- `background.js` — service worker, API calls, cache logic
+- `content.js` — YouTube page integration / panel logic
+- `popup.html` / `popup.js` / `popup.css` — popup UI
+- icons — extension icon assets
 
-## How to install and run (step-by-step)
+## Setup (local)
 
-### 1) Install Ollama (local LLM)
-- Follow the official Ollama instructions for your OS and install the tool. (Ollama runs locally and exposes a REST API on port `11434` by default.) :contentReference[oaicite:3]{index=3}
-- Pull/install a model that you can run locally (small models are recommended for local machines).
-  - Example: `ollama pull llama3.2` or any model you prefer and have the hardware for.
-- Start the Ollama server (if required): `ollama serve` (or follow the guide in their docs). Ensure it's running and reachable at `http://localhost:11434`.
+1. Clone repo
+2. Open Chrome and go to `chrome://extensions`
+3. Enable **Developer mode**
+4. Click **Load unpacked**
+5. Select this project folder
 
-### 2) Test Ollama locally (optional quick check)
-From a terminal:
-```bash
-curl http://localhost:11434/api/generate -d '{ "model": "your-model-name", "prompt": "Hello", "stream": false }'
+## Configure Gemini API key
+
+1. Click the extension icon
+2. Paste your Gemini API key in the API key field
+3. Click **Save API Key**
+
+The key is stored in `chrome.storage.sync` for your browser profile.
+
+## Use
+
+1. Open a YouTube video page
+2. Open extension popup
+3. Confirm/pre-fill title (or edit title manually)
+4. Click **Get Lyrics**
+
+## Permissions used
+
+- `storage` — save API key and cache lyrics
+- `activeTab` + `scripting` — detect title from active YouTube tab
+- `host_permissions`:
+  - `https://www.youtube.com/*`
+  - `https://generativelanguage.googleapis.com/*`
+
+## Security notes
+
+- Do **not** hardcode API keys in source code.
+- If a key was ever committed, revoke/rotate it immediately.
+- Keep permissions minimal and justify them in store listing.
+
+## Known limitations
+
+- Lyrics quality depends on LLM output and song availability.
+- Some songs may return incomplete or incorrect text.
+- YouTube page structure changes can affect title detection logic.
