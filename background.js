@@ -17,11 +17,7 @@ const MODEL_FALLBACKS = [
 function normalize(str) {
   return (str || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "").trim();
 }
-
-function sleep(ms) { 
-  return new Promise((r) => setTimeout(r, ms)); 
-}
-
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function cleanTitle(raw) {
   return (raw || "")
     .replace(/\s*-\s*YouTube\s*$/i, "")
@@ -31,7 +27,6 @@ function cleanTitle(raw) {
     .replace(/\s+/g, " ")
     .trim();
 }
-
 function normalizeForTokens(t) {
   return (t || "")
     .toLowerCase()
@@ -39,11 +34,9 @@ function normalizeForTokens(t) {
     .replace(/\s+/g, " ")
     .trim();
 }
-
 function tokenSet(t) {
   return new Set(normalizeForTokens(t).split(" ").filter(Boolean));
 }
-
 function overlapScore(extracted, source) {
   const a = tokenSet(extracted);
   const b = tokenSet(source);
@@ -52,30 +45,25 @@ function overlapScore(extracted, source) {
   for (const tok of a) if (b.has(tok)) hit++;
   return hit / a.size;
 }
-
 function looksLikeMetaOutput(text) {
   return /here (are|is)|lyrics for|i can('|’)t|sorry|note:|explanation|analysis|translation|markdown|as an ai/i.test(text || "");
 }
-
 function lineCount(text) {
   return (text || "").split("\n").map(s => s.trim()).filter(Boolean).length;
 }
-
 function uniqueLines(text) {
+  const seen = new Set();
   const out = [];
-  let lastK = "";
   for (const l of (text || "").split("\n")) {
     const t = l.trim();
     if (!t) continue;
     const k = normalizeForTokens(t);
-    // Only skip if the exact same line is repeated back-to-back (AI stutter)
-    if (k && k === lastK) continue; 
-    lastK = k;
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
     out.push(t);
   }
   return out.join("\n");
 }
-
 function isValidLyricsExtraction(extracted, sourceText, looseMode = false) {
   if (!extracted) return { ok: false, reason: "empty" };
   const out = extracted.trim();
@@ -91,7 +79,6 @@ function isValidLyricsExtraction(extracted, sourceText, looseMode = false) {
 
   return { ok: true, score, lines };
 }
-
 function orderedModels(primary) {
   return [...new Set([primary, ...MODEL_FALLBACKS].filter(Boolean))];
 }
@@ -101,7 +88,6 @@ async function getSettings() {
   const data = await chrome.storage.sync.get(SETTINGS_KEY);
   return { ...DEFAULT_SETTINGS, ...(data[SETTINGS_KEY] || {}) };
 }
-
 async function saveSettings(partial) {
   const cur = await getSettings();
   const next = { ...cur, ...partial };
@@ -164,28 +150,26 @@ SOURCE_TEXT:
 ${sourceText}
 `.trim();
 }
-
-function continuationPrompt(songTitle, sourceName, sourceText, lastExtractedLines) {
+function continuationPrompt(songTitle, sourceName, sourceText, alreadyExtracted) {
   return `
 You are a strict text extractor.
-Extract the NEXT lyric lines for "${songTitle}" from SOURCE_TEXT.
-
-Here are the LAST FEW LINES we already extracted:
-${lastExtractedLines}
+Extract ADDITIONAL lyric lines for "${songTitle}" from SOURCE_TEXT that are not already in ALREADY_EXTRACTED.
 
 Rules:
-1) Find where those last few lines appear in SOURCE_TEXT, and extract ONLY the lines that come AFTER them.
-2) Use ONLY words present in SOURCE_TEXT.
-3) Do NOT repeat the lines shown above.
-4) If there are no more lyrics after that point, return exactly: NOT_FOUND
+1) Use ONLY words present in SOURCE_TEXT.
+2) Do NOT infer or generate missing lines.
+3) Return only new lines.
+4) If none, return exactly: NOT_FOUND
 5) Plain text only.
 
 SOURCE_NAME: ${sourceName}
+ALREADY_EXTRACTED:
+${alreadyExtracted}
+
 SOURCE_TEXT:
 ${sourceText}
 `.trim();
 }
-
 function groundedPrompt(songTitle) {
   return `
 Find lyrics text for "${songTitle}" from web-grounded sources.
@@ -296,42 +280,32 @@ async function extractFromSource({ apiKey, model, songTitle, sourceName, sourceT
     preferredModel: model,
     body: {
       contents: [{ parts: [{ text: extractionPrompt(songTitle, sourceName, sourceText) }] }],
-      generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 2048 }
+      generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1200 }
     }
   });
   
-  if (!first.ok || !first.text) return { ok: false };
-  
-  let firstText = first.text.trim();
-  if (firstText === "NOT_FOUND" || firstText.includes("NOT_FOUND")) {
-    return { ok: false };
+  // STRICT NOT_FOUND catch on the first pass
+  if (!first.ok || !first.text || first.text.includes("NOT_FOUND")) {
+      return { ok: false };
   }
 
-  let merged = firstText;
-  let currentModel = first.modelUsed || model;
+  let merged = first.text.trim();
 
-  for (let i = 0; i < 3; i++) {
-    const linesArr = merged.split("\n").map(x => x.trim()).filter(Boolean);
-    if (linesArr.length === 0) break;
-    const lastFewLines = linesArr.slice(-3).join("\n");
-
-    const next = await callWithFallback({
-      apiKey,
-      preferredModel: currentModel,
-      body: {
-        contents: [{ parts: [{ text: continuationPrompt(songTitle, sourceName, sourceText, lastFewLines) }] }],
-        generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 2048 }
-      }
-    });
-
-    if (!next.ok || !next.text) break;
-    
-    let nextText = next.text.trim();
-    if (nextText === "NOT_FOUND" || nextText.includes("NOT_FOUND")) {
-      break; 
+  const second = await callWithFallback({
+    apiKey,
+    preferredModel: first.modelUsed || model,
+    body: {
+      contents: [{ parts: [{ text: continuationPrompt(songTitle, sourceName, sourceText, merged) }] }],
+      generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1200 }
     }
-    
-    merged += `\n${nextText}`;
+  });
+
+  // STRICT NOT_FOUND catch on the second pass
+  if (second.ok && second.text) {
+      let secondText = second.text.trim();
+      if (secondText && !secondText.includes("NOT_FOUND")) {
+          merged += `\n${secondText}`;
+      }
   }
 
   merged = uniqueLines(merged).trim();
@@ -341,7 +315,7 @@ async function extractFromSource({ apiKey, model, songTitle, sourceName, sourceT
   return {
     ok: true,
     lyrics: merged,
-    modelUsed: currentModel,
+    modelUsed: first.modelUsed || model,
     score: valid.score,
     lines: valid.lines,
     sourceName
@@ -353,11 +327,13 @@ async function groundedExpand({ apiKey, model, songTitle, existingLyrics }) {
   const body = {
     contents: [{ parts: [{ text: groundedPrompt(songTitle) }] }],
     tools: [{ google_search: {} }],
-    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 2048 }
+    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1400 }
   };
 
   const r = await callWithFallback({ apiKey, preferredModel: model, body });
-  if (!r.ok || !r.text || r.text.trim() === "NOT_FOUND") return { ok: false };
+  
+  // STRICT NOT_FOUND catch here too
+  if (!r.ok || !r.text || r.text.includes("NOT_FOUND")) return { ok: false };
 
   // keep only new lines
   const existing = new Set((existingLyrics || "").split("\n").map(x => normalizeForTokens(x)).filter(Boolean));
@@ -408,15 +384,16 @@ async function handleLyricsRequest({ title, manualQuery = "", looseMode = false 
     });
     if (!r.ok) continue;
     if (!best || r.lines > best.lines) best = r;
-    if (r.lines >= 45) break; 
+    if (r.lines >= 24) break;
   }
 
   if (!best) return { success: false, error: "Could not verify lyrics from local sources." };
 
+  // grounded expansion only when too short
   let finalLyrics = best.lyrics;
   let groundedUsed = false;
 
-  if (best.lines < 45) {
+  if (best.lines < 18) {
     const gx = await groundedExpand({
       apiKey: settings.apiKey,
       model: settings.model,
