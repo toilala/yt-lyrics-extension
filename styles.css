@@ -1,44 +1,73 @@
 body {
+  margin: 0;
+  padding: 0;
+  background: #111;
+  color: #eee;
   font-family: Arial, sans-serif;
-  width: 300px;
-  padding: 10px;
 }
-
 .container {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  width: 360px;
+  padding: 12px;
 }
-
-input[type="text"] {
+h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+label {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: #bbb;
+}
+input {
   width: 100%;
-  padding: 6px;
-  font-size: 14px;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #1b1b1b;
+  color: #fff;
 }
-
 .buttons {
   display: flex;
-  gap: 6px;
-
-
+  gap: 8px;
+  margin-top: 10px;
 }
-
 button {
   flex: 1;
-  padding: 6px;
-  font-size: 14px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: #2d6cdf;
+  color: #fff;
   cursor: pointer;
 }
-
-#status {
-  font-size: 12px;
-  color: gray;
+button:hover {
+  opacity: 0.9;
 }
-
+#status {
+  min-height: 20px;
+  font-size: 12px;
+  color: #9bd;
+  margin-top: 10px;
+}
 #lyrics {
+  max-height: 260px;
+  overflow: auto;
   white-space: pre-wrap;
-  max-height: 200px;
-  overflow-y: auto;
-  background: #f0f0f0;
-  padding: 6px;
+  background: #171717;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+}
+.hint {
+  margin-top: 8px;
+  color: #888;
+  font-size: 11px;
+}
+hr {
+  border: 0;
+  border-top: 1px solid #2a2a2a;
+  margin: 12px 0;
 }
