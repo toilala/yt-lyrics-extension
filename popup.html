@@ -3,40 +3,58 @@
 <head>
   <meta charset="UTF-8" />
   <title>YouTube Lyrics — Verified Extractor</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <div class="container">
-    <h2>YouTube Lyrics</h2>
+    <header class="topbar">
+      <h2>YouTube Lyrics</h2>
+      <button id="btnToggleSettings" class="ghost">⚙ Settings</button>
+    </header>
 
-    <label for="apiKey">Gemini API Key</label>
-    <input id="apiKey" type="password" placeholder="Paste your Gemini API key" />
+    <section id="settingsPanel" class="panel hidden">
+      <label for="apiKey">Gemini API Key</label>
+      <input id="apiKey" type="password" placeholder="Paste your Gemini API key" />
 
-    <label for="model">Gemini Model</label>
-    <input id="model" type="text" value="gemini-3.1-flash-lite" />
+      <label for="model">Gemini Model</label>
+      <input id="model" type="text" value="gemini-3.1-flash-lite" />
 
-    <div class="buttons">
-      <button id="btnSaveSettings">Save Settings</button>
-      <button id="btnTestApi">Test API</button>
-    </div>
+      <div class="row">
+        <button id="btnSaveSettings">Save Settings</button>
+        <button id="btnTestApi" class="secondary">Test API</button>
+      </div>
 
-    <hr />
+      <p class="hint">
+        Recommended: gemini-3.1-flash-lite (auto-fallback enabled).
+      </p>
+    </section>
 
-    <label for="title">Song Title</label>
-    <input id="title" type="text" placeholder="Auto-filled from YouTube when possible" />
+    <section class="panel">
+      <label for="title">Detected Song Title</label>
+      <input id="title" type="text" placeholder="Auto-filled from YouTube when possible" />
 
-    <div class="buttons">
-      <button id="btnGet">Get Verified Lyrics</button>
-      <button id="btnClear">Clear Cache</button>
-    </div>
+      <label for="manualQuery">Manual Search Title (optional)</label>
+      <input id="manualQuery" type="text" placeholder="e.g. Tesaile Hidey Ma lyrics" />
 
-    <p id="status"></p>
-    <pre id="lyrics"></pre>
+      <div class="row">
+        <button id="btnGet">Get Verified Lyrics</button>
+        <button id="btnClear" class="secondary">Clear Cache</button>
+      </div>
 
-    <p class="hint">
-      Default model is optimized for free-tier availability. Extension auto-fallbacks if needed.
-    </p>
+      <div class="row small-actions">
+        <button id="btnCopyLyrics" class="ghost">Copy</button>
+        <button id="btnRetryLoose" class="ghost">Retry (looser match)</button>
+      </div>
+
+      <p id="status"></p>
+      <pre id="lyrics"></pre>
+    </section>
+
+    <footer class="footer-note">
+      No direct lyric generation. Output is validated against source text.
+    </footer>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
