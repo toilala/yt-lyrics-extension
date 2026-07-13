@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>YouTube Lyrics — Gemini</title>
+  <title>YouTube Lyrics — Verified Extractor</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
@@ -13,7 +13,7 @@
     <input id="apiKey" type="password" placeholder="Paste your Gemini API key" />
 
     <label for="model">Gemini Model</label>
-    <input id="model" type="text" placeholder="e.g. gemini-1.5-flash" />
+    <input id="model" type="text" value="gemini-3.1-flash-lite" />
 
     <div class="buttons">
       <button id="btnSaveSettings">Save Settings</button>
@@ -32,8 +32,11 @@
 
     <p id="status"></p>
     <pre id="lyrics"></pre>
-  </div>
 
+    <p class="hint">
+      Default model is optimized for free-tier availability. Extension auto-fallbacks if needed.
+    </p>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>
