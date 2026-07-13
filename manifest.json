@@ -1,16 +1,19 @@
 {
   "manifest_version": 3,
   "name": "YouTube Lyrics — Verified Extractor",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Fetches and verifies lyrics from web sources using Gemini extraction (no direct generation).",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://duckduckgo.com/*",
-    "https://www.azlyrics.com/*",
-    "https://genius.com/*",
-    "https://www.lyrics.com/*"
+    "https://*.genius.com/*",
+    "https://*.azlyrics.com/*",
+    "https://*.lyrics.com/*",
+    "https://*.musixmatch.com/*",
+    "https://*.lyricstranslate.com/*",
+    "https://*.jiosaavn.com/*"
   ],
   "background": {
     "service_worker": "background.js"
