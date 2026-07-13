@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Lyrics — Gemini",
-  "version": "1.1.0",
-  "description": "Fetch and verify lyrics from web sources using Gemini extraction.",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "name": "YouTube Lyrics — Verified Extractor",
+  "version": "1.2.0",
+  "description": "Fetches and verifies lyrics from web sources using Gemini extraction (no direct generation).",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://generativelanguage.googleapis.com/*",
@@ -12,8 +12,17 @@
     "https://genius.com/*",
     "https://www.lyrics.com/*"
   ],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_popup": "popup.html" },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
