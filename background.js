@@ -150,16 +150,18 @@ SOURCE_TEXT:
 ${sourceText}
 `.trim();
 }
+
 function continuationPrompt(songTitle, sourceName, sourceText, alreadyExtracted) {
   return `
 You are a strict text extractor.
-Extract ADDITIONAL lyric lines for "${songTitle}" from SOURCE_TEXT that are not already in ALREADY_EXTRACTED.
+Extract ADDITIONAL lyric lines for "${songTitle}" from SOURCE_TEXT.
+Start exactly where ALREADY_EXTRACTED left off.
 
 Rules:
 1) Use ONLY words present in SOURCE_TEXT.
-2) Do NOT infer or generate missing lines.
-3) Return only new lines.
-4) If none, return exactly: NOT_FOUND
+2) Do NOT repeat lines that are already in ALREADY_EXTRACTED.
+3) Return only the new, subsequent lines.
+4) If there are no more lines to extract, return exactly: NOT_FOUND
 5) Plain text only.
 
 SOURCE_NAME: ${sourceName}
@@ -170,6 +172,7 @@ SOURCE_TEXT:
 ${sourceText}
 `.trim();
 }
+
 function groundedPrompt(songTitle) {
   return `
 Find lyrics text for "${songTitle}" from web-grounded sources.
@@ -280,24 +283,30 @@ async function extractFromSource({ apiKey, model, songTitle, sourceName, sourceT
     preferredModel: model,
     body: {
       contents: [{ parts: [{ text: extractionPrompt(songTitle, sourceName, sourceText) }] }],
-      generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1200 }
+      generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 2048 }
     }
   });
   if (!first.ok) return { ok: false };
 
   let merged = first.text || "";
+  let currentModel = first.modelUsed || model;
 
-  const second = await callWithFallback({
-    apiKey,
-    preferredModel: first.modelUsed || model,
-    body: {
-      contents: [{ parts: [{ text: continuationPrompt(songTitle, sourceName, sourceText, merged) }] }],
-      generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1200 }
+  // Loop continuation 3 times to get the rest of the song
+  for (let i = 0; i < 3; i++) {
+    const next = await callWithFallback({
+      apiKey,
+      preferredModel: currentModel,
+      body: {
+        contents: [{ parts: [{ text: continuationPrompt(songTitle, sourceName, sourceText, merged) }] }],
+        generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 2048 }
+      }
+    });
+
+    if (!next.ok || !next.text || next.text.trim() === "NOT_FOUND") {
+      break; 
     }
-  });
-
-  if (second.ok && second.text && second.text.trim() !== "NOT_FOUND") {
-    merged += `\n${second.text}`;
+    
+    merged += `\n${next.text}`;
   }
 
   merged = uniqueLines(merged).trim();
@@ -307,7 +316,7 @@ async function extractFromSource({ apiKey, model, songTitle, sourceName, sourceT
   return {
     ok: true,
     lyrics: merged,
-    modelUsed: first.modelUsed || model,
+    modelUsed: currentModel,
     score: valid.score,
     lines: valid.lines,
     sourceName
@@ -319,7 +328,7 @@ async function groundedExpand({ apiKey, model, songTitle, existingLyrics }) {
   const body = {
     contents: [{ parts: [{ text: groundedPrompt(songTitle) }] }],
     tools: [{ google_search: {} }],
-    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 1400 }
+    generationConfig: { temperature: 0, topP: 0.1, maxOutputTokens: 2048 }
   };
 
   const r = await callWithFallback({ apiKey, preferredModel: model, body });
@@ -374,16 +383,17 @@ async function handleLyricsRequest({ title, manualQuery = "", looseMode = false 
     });
     if (!r.ok) continue;
     if (!best || r.lines > best.lines) best = r;
-    if (r.lines >= 24) break;
+    // Increased break threshold to ensure fuller extractions are checked
+    if (r.lines >= 45) break; 
   }
 
   if (!best) return { success: false, error: "Could not verify lyrics from local sources." };
 
-  // grounded expansion only when too short
   let finalLyrics = best.lyrics;
   let groundedUsed = false;
 
-  if (best.lines < 18) {
+  // Increased fallback threshold to 45 lines
+  if (best.lines < 45) {
     const gx = await groundedExpand({
       apiKey: settings.apiKey,
       model: settings.model,
