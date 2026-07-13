@@ -23,6 +23,7 @@ async function send(msg) {
 async function loadSettings() {
   const res = await send({ action: "getSettings" });
   if (!res?.success) return;
+
   els.model.value = res.settings?.model || "gemini-3.1-flash-lite";
   setStatus(res.settings?.apiKey ? "API key configured." : "Set your Gemini API key.");
 }
@@ -30,6 +31,7 @@ async function loadSettings() {
 async function saveSettings() {
   const apiKey = (els.apiKey.value || "").trim();
   const model = (els.model.value || "").trim() || "gemini-3.1-flash-lite";
+
   const res = await send({ action: "saveSettings", apiKey, model });
   if (res?.success) {
     els.apiKey.value = "";
@@ -43,19 +45,28 @@ async function testApi() {
   setStatus("Testing API...");
   const apiKey = (els.apiKey.value || "").trim();
   const model = (els.model.value || "").trim();
+
   const res = await send({ action: "testApi", apiKey, model });
-  if (res?.success) setStatus(`API test successful. Model: ${res.modelUsed || model}`);
-  else setStatus(`API test failed: ${res?.error || "Unknown error"}`);
+  if (res?.success) {
+    if (res.modelUsed && res.modelUsed !== model) {
+      els.model.value = res.modelUsed;
+    }
+    setStatus(`API test successful. Model: ${res.modelUsed || model}`);
+  } else {
+    setStatus(`API test failed: ${res?.error || "Unknown error"}`);
+  }
 }
 
 async function prefillFromYouTube() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab?.url?.includes("youtube.com/watch")) return;
+
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => (document.title || "").replace(/\s*-\s*YouTube\s*$/i, "").trim()
     });
+
     if (result) {
       els.title.value = result;
       setStatus("Detected title from YouTube.");
@@ -69,21 +80,27 @@ async function requestLyrics() {
     setStatus("Enter a song title.");
     return;
   }
+
   setStatus("Fetching + verifying...");
   setLyrics("");
 
-  const res = await send({ action: "getLyricsForTitle", title });
-  if (!res) {
-    setStatus("No response from extension.");
-    return;
-  }
+  try {
+    const res = await send({ action: "getLyricsForTitle", title });
 
-  if (res.success) {
-    setLyrics(res.lyrics || "");
-    const domain = res.meta?.sourceDomain ? ` (${res.meta.sourceDomain})` : "";
-    setStatus(`Success: ${res.source}${domain}`);
-  } else {
-    setStatus(`Error: ${res.error || "Unknown error"}`);
+    if (!res) {
+      setStatus("No response from extension.");
+      return;
+    }
+
+    if (res.success) {
+      setLyrics(res.lyrics || "");
+      const domain = res.meta?.sourceDomain ? ` (${res.meta.sourceDomain})` : "";
+      setStatus(`Success: ${res.source}${domain}`);
+    } else {
+      setStatus(`Error: ${res.error || "Unknown error"}`);
+    }
+  } catch (e) {
+    setStatus(`Error: ${e.message || String(e)}`);
   }
 }
 
