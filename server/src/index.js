@@ -14,7 +14,7 @@ app.use(express.json({ limit: "1mb" }));
 const PORT = Number(process.env.PORT || 8080);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
-const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 12000);
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 20000);
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "*")
   .split(",")
@@ -32,7 +32,7 @@ app.use(
 );
 
 const cache = new NodeCache({ stdTTL: 60 * 60 * 24, checkperiod: 120 }); // 24h
-const searchLimit = pLimit(5);
+const searchLimit = pLimit(4);
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36";
@@ -82,14 +82,6 @@ async function fetchHtml(url) {
   return String(res.data || "");
 }
 
-function absoluteUrl(href, base) {
-  try {
-    return new URL(href, base).toString();
-  } catch {
-    return null;
-  }
-}
-
 async function searchDuckDuckGo(query) {
   const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const html = await fetchHtml(url);
@@ -108,7 +100,6 @@ async function searchDuckDuckGo(query) {
     } catch {}
   });
 
-  // fallback
   if (!links.size) {
     const regex = /https?:\/\/[^\s"'<>]+/g;
     const hits = html.match(regex) || [];
@@ -119,13 +110,6 @@ async function searchDuckDuckGo(query) {
   }
 
   return Array.from(links).slice(0, 15);
-}
-
-function textFromHtml(html) {
-  const $ = cheerio.load(html);
-  $("script,style,noscript,svg,header,footer,nav").remove();
-  const txt = $("body").text();
-  return txt.replace(/\r/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function extractLikelyLyricsBlocks(html) {
@@ -148,9 +132,8 @@ function extractLikelyLyricsBlocks(html) {
     });
   }
 
-  // generic large paragraph grouping fallback
-  const bodyText = $("body").text().replace(/\r/g, "");
-  if (bodyText.length > 500) blocks.push(bodyText);
+  const bodyText = $("body").text().replace(/\r/g, "").trim();
+  if (bodyText.length > 700) blocks.push(bodyText);
 
   return [...new Set(blocks)].slice(0, 8);
 }
@@ -166,13 +149,6 @@ function overlapScore(a, b) {
   let hit = 0;
   for (const t of ta) if (tb.has(t)) hit++;
   return hit / ta.size;
-}
-
-function cleanModelOutput(text = "") {
-  return text
-    .replace(/^```[\s\S]*?\n/, "")
-    .replace(/```$/, "")
-    .trim();
 }
 
 function lineCount(text = "") {
@@ -191,6 +167,10 @@ function dedupeLines(text = "") {
     out.push(t);
   }
   return out.join("\n");
+}
+
+function cleanModelOutput(text = "") {
+  return text.replace(/^```[\s\S]*?\n/, "").replace(/```$/, "").trim();
 }
 
 async function callGemini(prompt, model = GEMINI_MODEL) {
@@ -262,19 +242,19 @@ ${block}
 }
 
 async function extractFromBlock(songTitle, block, sourceUrl) {
-  let first = await callGemini(extractionPrompt(songTitle, block, sourceUrl));
+  const first = await callGemini(extractionPrompt(songTitle, block, sourceUrl));
   if (!first || first === "NOT_FOUND") return null;
 
   let merged = first;
-  let second = await callGemini(continuationPrompt(songTitle, block, sourceUrl, merged));
+  const second = await callGemini(continuationPrompt(songTitle, block, sourceUrl, merged));
   if (second && second !== "NOT_FOUND") merged += `\n${second}`;
 
   merged = dedupeLines(merged);
 
   const lines = lineCount(merged);
   const overlap = overlapScore(merged, block);
-  if (lines < 4 || overlap < 0.5) return null;
 
+  if (lines < 4 || overlap < 0.5) return null;
   return { lyrics: merged, lines, overlap, sourceUrl };
 }
 
@@ -288,7 +268,7 @@ async function retrieveLyrics({ title, artist = "" }) {
     for (const l of links) urls.add(l);
   }
 
-  const candidateUrls = Array.from(urls).slice(0, 20);
+  const candidateUrls = Array.from(urls).slice(0, 16);
 
   const blocks = [];
   await Promise.all(
@@ -300,7 +280,7 @@ async function retrieveLyrics({ title, artist = "" }) {
           for (const x of b) {
             blocks.push({
               sourceUrl: u,
-              block: x.slice(0, 28000)
+              block: x.slice(0, 24000)
             });
           }
         } catch {}
@@ -310,7 +290,6 @@ async function retrieveLyrics({ title, artist = "" }) {
 
   if (!blocks.length) return { status: "not_found", reason: "no_blocks" };
 
-  // rank candidate blocks quickly by keyword presence
   const titleTokens = songTitle.toLowerCase().split(" ").filter(Boolean);
   blocks.sort((a, b) => {
     const sa = titleTokens.reduce((n, t) => n + (a.block.toLowerCase().includes(t) ? 1 : 0), 0);
@@ -339,9 +318,19 @@ async function retrieveLyrics({ title, artist = "" }) {
   };
 }
 
-// ---------- API ----------
+app.get("/", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "yt-lyrics-backend",
+    endpoints: {
+      health: "/health",
+      lyrics: "POST /lyrics { title, artist? }"
+    }
+  });
+});
+
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "yt-lyrics-backend" });
+  res.json({ ok: true, service: "yt-lyrics-backend", model: GEMINI_MODEL });
 });
 
 app.post("/lyrics", async (req, res) => {
@@ -357,7 +346,11 @@ app.post("/lyrics", async (req, res) => {
 
     const result = await retrieveLyrics({ title, artist });
     if (result.status === "not_found") {
-      return res.json({ success: false, error: "Lyrics not found with sufficient confidence", reason: result.reason });
+      return res.json({
+        success: false,
+        error: "Lyrics not found with sufficient confidence",
+        reason: result.reason
+      });
     }
 
     cache.set(key, result);
