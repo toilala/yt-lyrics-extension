@@ -96,3 +96,46 @@ git status
 git log
 git remote -v
 git pull origin main
+
+
+
+Microsoft Windows [Version 10.0.26200.8655]
+(c) Microsoft Corporation. All rights reserved.
+
+C:\Users\User\Desktop\yt-lyrics-extension>git add .
+
+C:\Users\User\Desktop\yt-lyrics-extension>git commit -m "added backend"
+[main b5f8342] added backend
+ 8 files changed, 1006 insertions(+), 687 deletions(-)
+ create mode 100644 server/.env.example
+ create mode 100644 server/Dockerfile
+ create mode 100644 server/src/index.js
+
+C:\Users\User\Desktop\yt-lyrics-extension>git push
+To https://github.com/toilala/yt-lyrics-extension
+ ! [rejected]        main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/toilala/yt-lyrics-extension'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+
+C:\Users\User\Desktop\yt-lyrics-extension>git pull
+error: Your local changes to the following files would be overwritten by merge:
+        server/package.json
+Please commit your changes or stash them before you merge.
+Aborting
+Merge with strategy ort failed.
+
+C:\Users\User\Desktop\yt-lyrics-extension>git     
+
+
+//help me solve it 
+It looks like you are trying to push your changes to the remote repository, but your local branch is behind the remote branch. Additionally, you have local changes in `server/package.json` that would be overwritten by a merge. Here’s how you can resolve this issue:
+1. **Commit your local changes**: If you want to keep your changes in `server/package.json`, you should commit them first.
+
+```bash
+git add server/package.json
+git commit -m "added package json changes"
+
+```
