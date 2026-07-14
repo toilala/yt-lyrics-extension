@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "YouTube Lyrics",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "https://your-backend-domain.com/*"
+    "https://yt-lyrics-extension.onrender.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": { "default_popup": "popup.html" }
