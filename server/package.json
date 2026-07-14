@@ -1,4 +1,6 @@
+PORT=8080
+GEMINI_API_KEY=your_server_side_key_here
+GEMINI_MODEL=gemini-3.1-flash-lite
+ALLOWED_ORIGINS=* 
+REQUEST_TIMEOUT_MS=12000
 
-// git add server/package.json
-// git commit -m "Add package.json for server dependencies"
-// git push origin main
