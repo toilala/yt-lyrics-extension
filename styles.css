@@ -6,14 +6,12 @@
   --line: #2a2a2a;
   --primary: #2d6cdf;
   --secondary: #333;
-  --ok: #8ee39a;
-  --warn: #f2d27a;
-  --err: #ff8f8f;
 }
 
 * {
   box-sizing: border-box;
 }
+
 body {
   margin: 0;
   padding: 0;
@@ -21,36 +19,24 @@ body {
   color: var(--text);
   font-family: Arial, sans-serif;
 }
+
 .container {
   width: 380px;
   padding: 12px;
 }
-.topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
+
 h2 {
-  margin: 0;
+  margin: 0 0 12px;
   font-size: 18px;
 }
-.panel {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px;
-  margin-bottom: 10px;
-}
-.hidden {
-  display: none;
-}
+
 label {
   display: block;
   margin: 8px 0 4px;
   color: var(--muted);
   font-size: 12px;
 }
+
 input {
   width: 100%;
   padding: 8px;
@@ -59,11 +45,13 @@ input {
   background: #1b1b1b;
   color: #fff;
 }
+
 .row {
   display: flex;
   gap: 8px;
   margin-top: 10px;
 }
+
 button {
   flex: 1;
   padding: 8px 10px;
@@ -73,37 +61,18 @@ button {
   color: white;
   cursor: pointer;
 }
-button.secondary {
-  background: var(--secondary);
-}
-button.ghost {
-  background: transparent;
-  border: 1px solid var(--line);
-}
+
 button:hover {
   opacity: 0.92;
 }
-.small-actions button {
-  padding: 6px 8px;
-  font-size: 12px;
-}
+
 #status {
   min-height: 20px;
   margin-top: 10px;
   font-size: 12px;
-}
-.status-ok {
-  color: var(--ok);
-}
-.status-warn {
-  color: var(--warn);
-}
-.status-err {
-  color: var(--err);
-}
-.status-info {
   color: #9bd;
 }
+
 #lyrics {
   margin-top: 8px;
   max-height: 260px;
@@ -115,85 +84,9 @@ button:hover {
   padding: 8px;
   font-size: 12px;
 }
-.hint {
-  margin: 8px 0 0;
-  color: #8f8f8f;
-  font-size: 11px;
-}
-.footer-note {
-  color: #7d7d7d;
-  font-size: 11px;
-  text-align: center;
-}body {
-  margin: 0;
-  padding: 0;
-  background: #111;
-  color: #eee;
-  font-family: Arial, sans-serif;
-}
-.container {
-  width: 360px;
-  padding: 12px;
-}
-h2 {
-  margin: 0 0 12px;
-  font-size: 18px;
-}
-label {
-  display: block;
-  margin: 8px 0 4px;
-  font-size: 12px;
-  color: #bbb;
-}
-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px;
-  border: 1px solid #333;
-  border-radius: 6px;
-  background: #1b1b1b;
-  color: #fff;
-}
-.buttons {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-button {
-  flex: 1;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 6px;
-  background: #2d6cdf;
-  color: #fff;
-  cursor: pointer;
-}
-button:hover {
-  opacity: 0.9;
-}
-#status {
-  min-height: 20px;
-  font-size: 12px;
-  color: #9bd;
-  margin-top: 10px;
-}
-#lyrics {
-  max-height: 260px;
-  overflow: auto;
-  white-space: pre-wrap;
-  background: #171717;
-  border: 1px solid #2a2a2a;
-  border-radius: 6px;
-  padding: 8px;
-  font-size: 12px;
-}
-.hint {
-  margin-top: 8px;
-  color: #888;
-  font-size: 11px;
-}
+
 hr {
   border: 0;
-  border-top: 1px solid #2a2a2a;
+  border-top: 1px solid var(--line);
   margin: 12px 0;
 }
